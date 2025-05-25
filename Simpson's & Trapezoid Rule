@@ -1,1 +1,41 @@
+import numpy as np
+import torch
+import sympy as smp
+import matplotlib.pyplot as plt
 
+# Parameters
+n = 50
+h = 2*np.pi/n
+x = np.arange(0, 2*np.pi + h, h)
+y = np.cos(x)
+y_int = np.sin(x)  # True integral
+
+# Trapezoidal Rule
+TotalArea = np.zeros(n+1)
+for i in range(0, n):
+    A = h * (y[i] + y[i+1]) / 2
+    TotalArea[i+1] = TotalArea[i] + A
+
+# Simpson's Rule
+TotalAreaS = np.zeros(n//2 + 1)
+count = 0
+for i in range(0, n-1, 2):
+    A = h * (y[i] + 4*y[i+1] + y[i+2]) / 3
+    TotalAreaS[count+1] = TotalAreaS[count] + A
+    count += 1
+
+# Adjust x-axis for Simpson's Rule (every 2 steps)
+x_simp = x[::2]
+
+# Plot
+plt.figure(figsize=(10,6))
+plt.plot(x, y_int - y_int[0], label='Exact Integral (sin(x))', linewidth=2)
+plt.plot(x, TotalArea, 'o-', label='Trapezoidal Rule', alpha=0.7)
+plt.plot(x_simp, TotalAreaS, 's-', label='Simpson\'s Rule', alpha=0.7)
+plt.title('Numerical Integration of cos(x)')
+plt.xlabel('x')
+plt.ylabel('∫ cos(x) dx')
+plt.grid(True)
+plt.legend()
+plt.tight_layout()
+plt.show()
