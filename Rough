@@ -1,0 +1,44 @@
+import numpy as np
+import scipy as sp
+import sympy as smp
+import math as m
+import matplotlib.pyplot as plt
+
+x, y, z, xm, y1, y2, zk, Fx = smp.symbols('x y z x_m y_1 y_2 z_k F_x', real = 'True')
+
+num = (y-y1) + smp.sqrt((x-xm)**2 + (y-y1)**2 + (z-zk)**2)
+den = (y-y2) + smp.sqrt((x-xm)**2 + (y-y2)**2 + (z-zk)**2)
+
+Fx = num/den
+Fx
+
+x, y, z, x1, x2, ym, zk, Hy = smp.symbols('x y z x_1 x_2 y_m z_k H_y', real = 'True')
+
+num = (x-x1) + smp.sqrt(((x-x1)**2 + (y-ym)**2 + (z-zk)**2))
+den = (x-x2) + smp.sqrt(((x-x2)**2 + (y-ym)**2 + (z-zk)**2))
+
+Hy =  (num/den)
+Hy
+
+x, y, z, xn, ym, zk, Gz = smp.symbols('x y z x_n y_m z_k G_z', real='True')
+
+Gz = 1 / smp.sqrt((x-xn)**2 + (y-ym)**2 + (z-zk)**2)
+Gz
+
+
+
+#B_x (X,Y)
+mu,pi,x,y,z,M,w,h = smp.symbols('mu_o pi x y z M_s w h', real = 'True')
+f = ((mu * M) /  (4*pi))
+Fa = ((x+w)**2 + (y-h)**2) / ((x+w)**2 + (y+h)**2)
+Fb = ((x-w)**2 + (y-h)**2) / ((x-w)**2 + (y+h)**2)
+Bx = (f) * (smp.ln(Fa)-smp.ln(Fb))
+Bx
+
+#B_y(X,Y)
+Fc = ((2*h*(x+w)) / ((x+w)**2 + y**2 - h**2))
+Fd = ((2*h*(x-w)) / ((x-w)**2 + y**2 - h**2))
+By = (2*f)*((smp.atan(Fc)-smp.atan(Fd)))
+By
+
+
