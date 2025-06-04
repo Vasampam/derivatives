@@ -1,0 +1,105 @@
+import numpy as np
+import cupy as cp
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+
+# Constants
+mu = 4 * np.pi * 1e-7  # Permeability H/m
+M = 4.3e5              # Magnetization A/m
+L = 50                 # Total height of magnet
+z_obs = -25            # Observation point z-coordinate
+zi_min, zi_max = -L/2, L/2  # Source z-coordinate range
+
+# Parametric study parameters
+r_values = cp.linspace(1, 5, 50).get()    # Observation radius range
+ri_values = cp.linspace(1, 5, 50).get()   # Source radius range
+phi_points = 100       # Integration points for angular coordinate
+z_points = 100         # Integration points for axial coordinate
+
+# GPU-accelerated field calculation functions
+def calculate_fields_gpu(r_obs, ri_src):
+    """Calculate B components for given observation radius and source radius"""
+    # Create grid for integration
+    phi_grid, zi_grid = cp.meshgrid(cp.linspace(0, 2*np.pi, phi_points),
+                                   cp.linspace(zi_min, zi_max, z_points))
+    
+    # Calculate geometric terms
+    delta_z = z_obs - zi_grid
+    cos_phi = cp.cos(phi_grid)
+    
+    # Common denominator term
+    r_sq = r_obs**2 + ri_src**2 - 2*r_obs*ri_src*cp.cos(phi_grid)
+    z_sq = delta_z**2
+    denominator = cp.sqrt(r_sq + z_sq)**3
+    
+    # Radial component integrand
+    integrand_br = cos_phi * (r_obs - ri_src*cp.cos(phi_grid)) / denominator
+    
+    # Azimuthal component integrand
+    integrand_bphi = cos_phi * cp.sin(phi_grid) / denominator
+    
+    # Axial component integrand
+    integrand_bz = cos_phi * delta_z / denominator
+    
+    # Trapezoidal integration
+    br_int = cp.trapz(cp.trapz(integrand_br, axis=1), axis=0)
+    bphi_int = cp.trapz(cp.trapz(integrand_bphi, axis=1), axis=0)
+    bz_int = cp.trapz(cp.trapz(integrand_bz, axis=1), axis=0)
+    
+    # Calculate final field components
+    Br = (mu * M * ri_src / (4*np.pi)) * br_int
+    Bphi = (mu * M * ri_src**2 / (4*np.pi)) * bphi_int
+    Bz_val = (mu * M * ri_src / (4*np.pi)) * bz_int
+    
+    return Br, Bphi, Bz_val
+
+# Parametric optimization grid
+R, RI = np.meshgrid(r_values, ri_values, indexing='ij')
+Br_results = np.zeros_like(R)
+Bp_results = np.zeros_like(R)
+Bz_results = np.zeros_like(R)
+
+# GPU-accelerated computation
+for i, r_val in enumerate(r_values):
+    for j, ri_val in enumerate(ri_values):
+        # Transfer data to GPU
+        r_gpu = cp.array([r_val])
+        ri_gpu = cp.array([ri_val])
+        
+        # Calculate components
+        Br_gpu, Bp_gpu, Bz_gpu = calculate_fields_gpu(r_gpu, ri_gpu)
+        
+        # Transfer results back to CPU
+        Br_results[i, j] = Br_gpu.get()[0]
+        Bp_results[i, j] = Bp_gpu.get()[0]
+        Bz_results[i, j] = Bz_gpu.get()[0]
+
+# Visualization
+fig = plt.figure(figsize=(20, 6))
+
+# Radial component plot
+ax1 = fig.add_subplot(131, projection='3d')
+surf1 = ax1.plot_surface(R, RI, Br_results, cmap='viridis')
+ax1.set_title('Radial Component (Br)')
+ax1.set_xlabel('Observation Radius (m)')
+ax1.set_ylabel('Source Radius (m)')
+ax1.set_zlabel('Br (T)')
+
+# Azimuthal component plot
+ax2 = fig.add_subplot(132, projection='3d')
+surf2 = ax2.plot_surface(R, RI, Bp_results, cmap='plasma')
+ax2.set_title('Azimuthal Component (Bφ)')
+ax2.set_xlabel('Observation Radius (m)')
+ax2.set_ylabel('Source Radius (m)')
+ax2.set_zlabel('Bφ (T)')
+
+# Axial component plot
+ax3 = fig.add_subplot(133, projection='3d')
+surf3 = ax3.plot_surface(R, RI, Bz_results, cmap='cividis')
+ax3.set_title('Axial Component (Bz)')
+ax3.set_xlabel('Observation Radius (m)')
+ax3.set_ylabel('Source Radius (m)')
+ax3.set_zlabel('Bz (T)')
+
+plt.tight_layout()
+plt.show()
