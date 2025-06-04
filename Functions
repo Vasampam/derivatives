@@ -1,0 +1,49 @@
+import numpy as np
+import scipy as sp
+import sympy as smp
+import math
+import matplotlib.pyplot as plt
+from scipy.integrate import quad
+
+mu, M, k, m, Bx= smp.symbols('mu_o M_s k m B_x', real = 'True')
+f = (mu * M) / (4 * smp.pi)
+f
+
+######Function of Fx########## XYZ for bar magnet
+
+x, y, z, xm, y1, y2, zk, Fx, Bx = smp.symbols('x y z x_m y_1 y_2 z_k F_x B_x', real = 'True')
+
+num = (y-y1) + smp.sqrt((x-xm)**2 + (y-y1)**2 + (z-zk)**2)
+den = (y-y2) + smp.sqrt((x-xm)**2 + (y-y2)**2 + (z-zk)**2)
+
+Fx = num/den
+Fx
+######Function of Fy##########
+
+x, y, z, x1, x2, ym, zk, Hy, By = smp.symbols('x y z x_1 x_2 y_m z_k H_y B_y', real = 'True')
+
+num = (x-x1) + smp.sqrt(((x-x1)**2 + (y-ym)**2 + (z-zk)**2))
+den = (x-x2) + smp.sqrt(((x-x2)**2 + (y-ym)**2 + (z-zk)**2))
+
+Hy =  (num/den)
+Hy
+
+######Function of Fz##########
+
+x, y, z, xn, ym, zk, Gz, Bz = smp.symbols('x y z x_n y_m z_k G_z B_z', real='True')
+
+Gz = 1 / smp.sqrt((x-xn)**2 + (y-ym)**2 + (z-zk)**2)
+Gz
+
+######Function of g ########## For Cylinder
+
+r, ri, phi, phii, z, zi, g = smp.symbols('r r\' phi phi\' z z\' g', real = True)
+g = 1 / smp.sqrt(r**2 + ri**2 - 2*r*ri*smp.cos(phi-phii) + (z-zi)**2 )
+g
+
+
+
+
+
+
+
