@@ -1,0 +1,125 @@
+import numpy as np
+from scipy.integrate import tplquad # Import tplquad for triple integrals
+import matplotlib.pyplot as plt
+
+# --- 1. Physical Constants and Magnet Parameters (Consistent SI Units) ---
+mu_o = 4 * np.pi * 1e-7  # Permeability of free space (H/m)
+M_s = 4.3 * 10**5        # Magnetization (A/m)
+
+# Solid Disc Magnet Geometry (Defining its outer radius and height)
+R_magnet_outer = 2.54e-2 # Outer radius of the solid disc magnet (meters) - converted from 2.54 cm
+z_magnet_start = -25e-3  # Start z-coordinate of the magnet (meters) - converted from -25 mm
+z_magnet_end = 25e-3     # End z-coordinate of the magnet (meters) - converted from 25 mm
+
+# The common prefactor for all integrals, as r' is now an integration variable.
+# This assumes the r' and r'^2 in your original formula were part of the integral's derivation.
+common_prefactor = (mu_o * M_s) / (4 * np.pi)
+
+# ====================================================================
+# Core Helper Function: g(r,phi,z,r',phi',z') - Same for all components
+# r,phi,z are observation points; r',phi',z' are source points
+# ====================================================================
+def g_func(r_obs, phi_obs, z_obs, r_prime, phi_prime, z_prime):
+    """
+    Calculates g = 1 / distance, where distance is between observation (r,phi,z)
+    and source (r_prime, phi_prime, z_prime).
+    Uses numpy for CPU calculations.
+    """
+    # Squared distance (d^2)
+    d_squared = r_obs**2 + r_prime**2 - 2 * r_obs * r_prime * np.cos(phi_obs - phi_prime) + (z_obs - z_prime)**2
+    
+    # Handle potential numerical issues if observation point is too close to source.
+    # Add a tiny epsilon to prevent division by zero or sqrt of negative number.
+    if d_squared < 1e-20: # A very small threshold
+        return 0.0 # Effectively makes integrand 0 at the singularity
+    
+    return 1.0 / np.sqrt(d_squared)
+
+# ====================================================================
+# Integrand Functions for B_r (for SciPy's tplquad)
+# tplquad expects func(z_innermost, y_mid, x_outermost, *args)
+# Here: func(phi_prime, r_prime, z_prime, r_obs, phi_obs, z_obs)
+# Note the additional `r_prime` multiplication at the end for the volume element dV' = r' dr' dphi' dz'
+# ====================================================================
+def integrand_Br_scipy_solid(phi_prime, r_prime, z_prime, r_obs, phi_obs, z_obs):
+    """
+    The integrand function for the B_r component of a solid disc.
+    Includes the r' factor from the volume element dV' = r' dr' dphi' dz'.
+    """
+    g_val = g_func(r_obs, phi_obs, z_obs, r_prime, phi_prime, z_prime)
+    # The term from your formula, multiplied by r_prime for the volume element
+    return np.cos(phi_prime) * (r_obs - r_prime * np.cos(phi_obs - phi_prime)) * (g_val**3) * r_prime
+
+# ====================================================================
+# Function to Calculate B_r at a Single Observation Point for SOLID Disc (CPU)
+# ====================================================================
+def calculate_Br_at_point_solid_disc(r_obs, phi_obs, z_obs):
+    """
+    Calculates the B_r component of the magnetic field at a single point (r_obs, phi_obs, z_obs)
+    for a solid disc magnet. Uses SciPy's tplquad for numerical integration.
+    """
+    # Define integration limits for tplquad (innermost to outermost):
+    # 1. phi_prime (0 to 2*pi) - depends on r_prime and z_prime (dummy arguments)
+    # 2. r_prime (0 to R_magnet_outer) - depends on z_prime (dummy argument)
+    # 3. z_prime (z_magnet_start to z_magnet_end)
+
+    # Note: Lambda functions pass the outer integration variable(s) to the inner limit functions.
+    # Here, phi_prime limits are constant regardless of r_prime or z_prime.
+    phi_prime_lower_limit = lambda r_prime_dummy, z_prime_dummy: 0.0
+    phi_prime_upper_limit = lambda r_prime_dummy, z_prime_dummy: 2 * np.pi
+
+    # r_prime limits are constant (0 to R_magnet_outer) regardless of z_prime.
+    r_prime_lower_limit = lambda z_prime_dummy: 0.0
+    r_prime_upper_limit = lambda z_prime_dummy: R_magnet_outer
+
+    # Perform the triple integration
+    result_integral, _ = tplquad(
+        integrand_Br_scipy_solid,
+        z_magnet_start, z_magnet_end,   # Outer integral limits for z_prime (x_outermost)
+        r_prime_lower_limit,            # Middle integral lower limit for r_prime (y_mid)
+        r_prime_upper_limit,            # Middle integral upper limit for r_prime (y_mid)
+        phi_prime_lower_limit,          # Innermost integral lower limit for phi_prime (z_innermost)
+        phi_prime_upper_limit,          # Innermost integral upper limit for phi_prime (z_innermost)
+        args=(r_obs, phi_obs, z_obs)    # Fixed parameters passed to integrand_Br_scipy_solid
+    )
+    
+    return common_prefactor * result_integral
+
+# --- 2. Define Varying Parameters using linspace ---
+# Observation points for plotting:
+# Let's vary 'r' (radial distance)
+r_observation_points = np.linspace(0.001, 0.08, 10) # From 1 mm to 80 mm, 10 points
+# Keep 'phi' and 'z' constant for this plot
+fixed_phi_obs = 0.0 # radians
+fixed_z_obs = 0.0 # meters (e.g., in the middle of the magnet's height)
+
+# --- 3. Calculate B_r for Each Point ---
+# Initialize an array to store the B_r values
+Br_values_solid = np.zeros_like(r_observation_points)
+
+print(f"Calculating B_r for {len(r_observation_points)} radial points for SOLID DISC...")
+print(f"Observation Plane: phi = {fixed_phi_obs} rad, z = {fixed_z_obs} m")
+
+for i, r_val in enumerate(r_observation_points):
+    Br_values_solid[i] = calculate_Br_at_point_solid_disc(r_val, fixed_phi_obs, fixed_z_obs)
+    print(f"  r = {r_val*1000:.2f} mm, B_r = {Br_values_solid[i]:.4e} Tesla")
+
+# --- 4. Plotting for Visualization and Optimization ---
+plt.figure(figsize=(10, 6))
+plt.plot(r_observation_points * 1000, Br_values_solid * 1000, 'o-', color='blue') # Plot in mm and mT
+plt.title(f'Radial Magnetic Field (B_r) vs. Observation Radius (r) for SOLID DISC\n'
+          f'at z={fixed_z_obs*1000:.1f} mm, phi={fixed_phi_obs:.2f} rad')
+plt.xlabel('Observation Radius, r (mm)')
+plt.ylabel('B_r (mT)')
+plt.grid(True, linestyle='--', alpha=0.7)
+plt.axvline(R_magnet_outer * 1000, color='red', linestyle='--', label='Magnet Outer Radius (R)')
+plt.axhline(0, color='black', linewidth=0.8)
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+print("\n--- Important Considerations for Solid Disc Calculation ---")
+print("1. **Computation Time:** Triple integrals are significantly more computationally expensive than double integrals.")
+print("   For larger grids or higher precision, this calculation can take a very long time on CPU.")
+print("2. **Accuracy:** The default tolerances of `tplquad` might be sufficient, but increasing `epsabs` and `epsrel` might be needed for higher accuracy (at the cost of more time).")
+print("3. **PyTorch/GPU:** For a solid disc, the benefits of GPU acceleration with PyTorch for triple integrals (using `torch.trapz` iteratively) become even more pronounced. If you're doing extensive analysis, that's highly recommended.")
