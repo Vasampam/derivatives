@@ -1,0 +1,283 @@
+import numpy as np
+from scipy.integrate import tplquad # For CPU-based triple integration (reference)
+import torch
+import matplotlib.pyplot as plt
+import time # For timing calculations
+
+# --- 1. Physical Constants and Magnet Parameters (Consistent SI Units) ---
+mu_o = 4 * np.pi * 1e-7  # Permeability of free space (H/m)
+M_s = 4.3 * 10**5        # Magnetization (A/m)
+
+# Solid Disc Magnet Geometry (Defining its outer radius and height)
+R_magnet_outer = 2.54e-2 # Outer radius of the solid disc magnet (meters) - converted from 2.54 cm
+z_magnet_start = -25e-3  # Start z-coordinate of the magnet (meters) - converted from -25 mm
+z_magnet_end = 25e-3     # End z-coordinate of the magnet (meters) - converted from 25 mm
+
+# The common prefactor for all integrals, as r' is now an integration variable.
+common_prefactor = (mu_o * M_s) / (4 * np.pi)
+
+# ====================================================================
+# Core Helper Function: g(r,phi,z,r',phi',z')
+# This version is adaptable for both NumPy (CPU) and PyTorch (CPU/GPU)
+# ====================================================================
+def g_func(r_obs, phi_obs, z_obs, r_prime, phi_prime, z_prime, lib=np):
+    """
+    Calculates g = 1 / distance, where distance is between observation (r,phi,z)
+    and source (r_prime, phi_prime, z_prime).
+    'lib' can be numpy or torch for flexibility.
+    """
+    d_squared = r_obs**2 + r_prime**2 - 2 * r_obs * r_prime * lib.cos(phi_obs - phi_prime) + (z_obs - z_prime)**2
+    
+    # Handle potential numerical issues (avoid division by zero or sqrt of negative)
+    # For NumPy, check explicitly; for PyTorch, use clamp.
+    if lib == np:
+        if d_squared < 1e-20:
+            return 0.0
+    else: # For torch
+        d_squared = lib.clamp(d_squared, min=1e-20)
+    
+    return 1.0 / lib.sqrt(d_squared)
+
+# ====================================================================
+# Integrand Functions for SciPy (CPU-based tplquad - for reference)
+# tplquad expects func(z_innermost, y_mid, x_outermost, *args)
+# Here: func(phi_prime, r_prime, z_prime, r_obs, phi_obs, z_obs)
+# Each integrand includes the r_prime factor from dV' = r' dr' dphi' dz'
+# ====================================================================
+def integrand_Br_scipy_solid(phi_prime, r_prime, z_prime, r_obs, phi_obs, z_obs):
+    g_val = g_func(r_obs, phi_obs, z_obs, r_prime, phi_prime, z_prime, lib=np)
+    return np.cos(phi_prime) * (r_obs - r_prime * np.cos(phi_obs - phi_prime)) * (g_val**3) * r_prime
+
+def integrand_Bphi_scipy_solid(phi_prime, r_prime, z_prime, r_obs, phi_obs, z_obs):
+    g_val = g_func(r_obs, phi_obs, z_obs, r_prime, phi_prime, z_prime, lib=np)
+    return np.cos(phi_prime) * np.sin(phi_obs - phi_prime) * (g_val**3) * r_prime
+
+def integrand_Bz_scipy_solid(phi_prime, r_prime, z_prime, r_obs, phi_obs, z_obs):
+    g_val = g_func(r_obs, phi_obs, z_obs, r_prime, phi_prime, z_prime, lib=np)
+    return np.cos(phi_prime) * (z_obs - z_prime) * (g_val**3) * r_prime
+
+# ====================================================================
+# Function to Calculate ALL B Components at a Single Point (SciPy - CPU)
+# Useful for small number of points or verification
+# ====================================================================
+def calculate_B_field_scipy_solid(r_obs, phi_obs, z_obs):
+    """
+    Calculates Br, Bphi, Bz at a single point (r,phi,z) for a solid disc magnet
+    using SciPy's tplquad (CPU-based).
+    """
+    phi_prime_limits = lambda r_prime_dummy, z_prime_dummy: 0.0, lambda r_prime_dummy, z_prime_dummy: 2 * np.pi
+    r_prime_limits = lambda z_prime_dummy: 0.0, lambda z_prime_dummy: R_magnet_outer
+    z_prime_limits = z_magnet_start, z_magnet_end
+
+    args_tuple = (r_obs, phi_obs, z_obs)
+
+    # Br Calculation
+    integral_Br, _ = tplquad(integrand_Br_scipy_solid, *z_prime_limits, *r_prime_limits, *phi_prime_limits, args=args_tuple)
+    Br = common_prefactor * integral_Br
+
+    # Bphi Calculation
+    integral_Bphi, _ = tplquad(integrand_Bphi_scipy_solid, *z_prime_limits, *r_prime_limits, *phi_prime_limits, args=args_tuple)
+    Bphi = common_prefactor * integral_Bphi
+
+    # Bz Calculation
+    integral_Bz, _ = tplquad(integrand_Bz_scipy_solid, *z_prime_limits, *r_prime_limits, *phi_prime_limits, args=args_tuple)
+    Bz = common_prefactor * integral_Bz
+
+    return Br, Bphi, Bz
+
+# ====================================================================
+# Integrand Functions for PyTorch (GPU-accelerated)
+# Operate on PyTorch tensors for meshgrid calculation
+# ====================================================================
+def integrand_Br_torch_solid(r_obs_t, phi_obs_t, z_obs_t, PHI_PRIME_MESH, R_PRIME_MESH, Z_PRIME_MESH):
+    g_val = g_func(r_obs_t, phi_obs_t, z_obs_t, R_PRIME_MESH, PHI_PRIME_MESH, Z_PRIME_MESH, lib=torch)
+    return torch.cos(PHI_PRIME_MESH) * (r_obs_t - R_PRIME_MESH * torch.cos(phi_obs_t - PHI_PRIME_MESH)) * (g_val**3) * R_PRIME_MESH
+
+def integrand_Bphi_torch_solid(r_obs_t, phi_obs_t, z_obs_t, PHI_PRIME_MESH, R_PRIME_MESH, Z_PRIME_MESH):
+    g_val = g_func(r_obs_t, phi_obs_t, z_obs_t, R_PRIME_MESH, PHI_PRIME_MESH, Z_PRIME_MESH, lib=torch)
+    return torch.cos(PHI_PRIME_MESH) * torch.sin(phi_obs_t - PHI_PRIME_MESH) * (g_val**3) * R_PRIME_MESH
+
+def integrand_Bz_torch_solid(r_obs_t, phi_obs_t, z_obs_t, PHI_PRIME_MESH, R_PRIME_MESH, Z_PRIME_MESH):
+    g_val = g_func(r_obs_t, phi_obs_t, z_obs_t, R_PRIME_MESH, PHI_PRIME_MESH, Z_PRIME_MESH, lib=torch)
+    return torch.cos(PHI_PRIME_MESH) * (z_obs_t - Z_PRIME_MESH) * (g_val**3) * R_PRIME_MESH
+
+# ====================================================================
+# Function to Calculate ALL B Components at a Single Point (PyTorch - CPU/GPU)
+# Recommended for optimization and large grids
+# ====================================================================
+def calculate_B_field_torch_solid(r_obs, phi_obs, z_obs, 
+                                  num_phi_prime_points=100, num_r_prime_points=100, num_z_prime_points=100):
+    """
+    Calculates Br, Bphi, Bz at a single point (r,phi,z) for a solid disc magnet
+    using PyTorch (CPU/GPU) with trapezoidal rule for triple integral.
+    """
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # Convert observation point and magnet parameters to PyTorch tensors on device
+    r_obs_t = torch.tensor(r_obs, dtype=torch.float64, device=device)
+    phi_obs_t = torch.tensor(phi_obs, dtype=torch.float64, device=device)
+    z_obs_t = torch.tensor(z_obs, dtype=torch.float64, device=device)
+    
+    R_magnet_outer_t = torch.tensor(R_magnet_outer, dtype=torch.float64, device=device)
+    z_magnet_start_t = torch.tensor(z_magnet_start, dtype=torch.float64, device=device)
+    z_magnet_end_t = torch.tensor(z_magnet_end, dtype=torch.float64, device=device)
+
+    # Create 1D tensors for integration variables
+    phi_prime_1d = torch.linspace(0.0, 2 * np.pi, num_phi_prime_points, device=device, dtype=torch.float64)
+    r_prime_1d = torch.linspace(0.0, R_magnet_outer_t, num_r_prime_points, device=device, dtype=torch.float64)
+    z_prime_1d = torch.linspace(z_magnet_start_t, z_magnet_end_t, num_z_prime_points, device=device, dtype=torch.float64)
+
+    # Create 3D meshgrids for evaluation (indexing='ij' for (phi', r', z') grid)
+    PHI_PRIME_MESH, R_PRIME_MESH, Z_PRIME_MESH = torch.meshgrid(phi_prime_1d, r_prime_1d, z_prime_1d, indexing='ij')
+
+    # Calculate integrand values over the meshgrid for each component
+    integrand_Br_vals = integrand_Br_torch_solid(r_obs_t, phi_obs_t, z_obs_t, PHI_PRIME_MESH, R_PRIME_MESH, Z_PRIME_MESH)
+    integrand_Bphi_vals = integrand_Bphi_torch_solid(r_obs_t, phi_obs_t, z_obs_t, PHI_PRIME_MESH, R_PRIME_MESH, Z_PRIME_MESH)
+    integrand_Bz_vals = integrand_Bz_torch_solid(r_obs_t, phi_obs_t, z_obs_t, PHI_PRIME_MESH, R_PRIME_MESH, Z_PRIME_MESH)
+
+    # Perform 3D Trapezoidal Rule Integration using torch.trapz (nested)
+    # Order of integration: innermost phi', then r', then z'
+    integral_Br = torch.trapz(torch.trapz(torch.trapz(integrand_Br_vals, x=phi_prime_1d, dim=0), x=r_prime_1d, dim=0), x=z_prime_1d, dim=0).item()
+    integral_Bphi = torch.trapz(torch.trapz(torch.trapz(integrand_Bphi_vals, x=phi_prime_1d, dim=0), x=r_prime_1d, dim=0), x=z_prime_1d, dim=0).item()
+    integral_Bz = torch.trapz(torch.trapz(torch.trapz(integrand_Bz_vals, x=phi_prime_1d, dim=0), x=r_prime_1d, dim=0), x=z_prime_1d, dim=0).item()
+
+    # Apply common prefactor
+    Br = common_prefactor * integral_Br
+    Bphi = common_prefactor * integral_Bphi
+    Bz = common_prefactor * integral_Bz
+
+    return Br, Bphi, Bz
+
+# ====================================================================
+# Example Usage: Calculating field at a single point (Comparison)
+# ====================================================================
+print("\n--- Testing Single Point Calculation (Solid Disc Magnet) ---")
+# Example observation point
+obs_r, obs_phi, obs_z = 3.8e-2, 0.0, 0.0 # e.g., on the axis, in the middle of the magnet
+
+print(f"Observation Point: r={obs_r:.3e} m, phi={obs_phi:.3e} rad, z={obs_z:.3e} m")
+
+# SciPy calculation (CPU) - uncomment for comparison, but be aware of speed
+# print("\nSciPy Results (CPU, this might be slow for triple integrals):")
+# start_time_scipy = time.time()
+# br_scipy, bphi_scipy, bz_scipy = calculate_B_field_scipy_solid(obs_r, obs_phi, obs_z)
+# end_time_scipy = time.time()
+# print(f"  Time: {end_time_scipy - start_time_scipy:.4f}s")
+# print(f"  B_r = {br_scipy:.4e} T")
+# print(f"  B_phi = {bphi_scipy:.4e} T")
+# print(f"  B_z = {bz_scipy:.4e} T")
+
+
+# PyTorch calculation (CPU/GPU) - Recommended for speed
+print(f"\nPyTorch Results ({'GPU' if torch.cuda.is_available() else 'CPU'}):")
+start_time_torch = time.time()
+br_torch, bphi_torch, bz_torch = calculate_B_field_torch_solid(obs_r, obs_phi, obs_z, 
+                                                            num_phi_prime_points=100, # Adjust for desired precision/speed
+                                                            num_r_prime_points=100, 
+                                                            num_z_prime_points=100)
+end_time_torch = time.time()
+print(f"  Time: {end_time_torch - start_time_torch:.4f}s")
+print(f"  B_r = {br_torch:.4e} T")
+print(f"  B_phi = {bphi_torch:.4e} T")
+print(f"  B_z = {bz_torch:.4e} T")
+
+
+# ====================================================================
+# Generating Field for Trial and Error Optimization (Varying Positions)
+# This uses the PyTorch function for efficiency
+# ====================================================================
+print("\n--- Generating Magnetic Field Over a 3D Grid for Optimization ---")
+
+# Define grid for observation points (adjust ranges and numbers as needed for your trials)
+# Example: Varying z (axial position) around the magnet
+z_positions = np.linspace(-0.06, 0.06, 15) # From -60mm to 60mm, 15 points
+# Example: Varying r (radial position)
+r_positions = np.linspace(0.001, 0.05, 10) # From 1mm to 50mm, 10 points
+# Example: Keep phi constant (or iterate through a few values if azimuthal dependence is critical)
+fixed_phi = 0.0 # On the x-z plane
+
+# Initialize arrays to store field components
+Br_field = np.zeros((len(r_positions), len(z_positions)))
+Bphi_field = np.zeros((len(r_positions), len(z_positions)))
+Bz_field = np.zeros((len(r_positions), len(z_positions)))
+
+print(f"Calculating field over a {len(r_positions)}x{len(z_positions)} grid using PyTorch...")
+field_calc_start_time = time.time()
+
+# Loop through each observation point in your defined ranges
+for i, r_obs_val in enumerate(r_positions):
+    for j, z_obs_val in enumerate(z_positions):
+        br, bphi, bz = calculate_B_field_torch_solid(r_obs_val, fixed_phi, z_obs_val,
+                                                     num_phi_prime_points=50, # Can be lower for faster trials
+                                                     num_r_prime_points=50,   # Adjust based on desired speed/accuracy
+                                                     num_z_prime_points=50)
+        Br_field[i, j] = br
+        Bphi_field[i, j] = bphi
+        Bz_field[i, j] = bz
+
+field_calc_end_time = time.time()
+print(f"Grid calculation complete in {field_calc_end_time - field_calc_start_time:.2f} seconds.")
+
+print("\n--- Sample Field Data (e.g., B_z along central axis for fixed r) ---")
+# Find index closest to r=0.01m
+r_idx_sample = np.argmin(np.abs(r_positions - 0.01))
+
+print(f"B_z at r={r_positions[r_idx_sample]*1000:.1f} mm:")
+for k, z_val in enumerate(z_positions):
+    print(f"  z={z_val*1000:.1f} mm: B_z={Bz_field[r_idx_sample, k]:.4e} T")
+
+# ====================================================================
+# Plotting for Visualization
+# ====================================================================
+# You can now plot 2D slices (e.g., r-z plane at fixed phi)
+# or extract 1D cuts (e.g., B_z along the z-axis, B_r along the z-axis or r-axis).
+
+# Plotting B_r field in r-z plane (for fixed phi)
+plt.figure(figsize=(14, 6))
+
+plt.subplot(1, 3, 1)
+R_mesh, Z_mesh = np.meshgrid(r_positions * 1000, z_positions * 1000)
+plt.pcolormesh(R_mesh, Z_mesh, Br_field.T * 1000, shading='auto', cmap='coolwarm')
+plt.colorbar(label='B_r (mT)')
+plt.title(f'B_r Field (phi={fixed_phi:.2f} rad)')
+plt.xlabel('r (mm)')
+plt.ylabel('z (mm)')
+plt.axhline(z_magnet_start * 1000, color='red', linestyle='--', label='Magnet Ends')
+plt.axhline(z_magnet_end * 1000, color='red', linestyle='--')
+plt.axvline(R_magnet_outer * 1000, color='orange', linestyle=':', label='Magnet Radius')
+plt.legend()
+
+
+# Plotting B_phi field in r-z plane (for fixed phi)
+plt.subplot(1, 3, 2)
+plt.pcolormesh(R_mesh, Z_mesh, Bphi_field.T * 1000, shading='auto', cmap='viridis')
+plt.colorbar(label='B_phi (mT)')
+plt.title(f'B_phi Field (phi={fixed_phi:.2f} rad)')
+plt.xlabel('r (mm)')
+plt.ylabel('z (mm)')
+plt.axhline(z_magnet_start * 1000, color='red', linestyle='--')
+plt.axhline(z_magnet_end * 1000, color='red', linestyle='--')
+plt.axvline(R_magnet_outer * 1000, color='orange', linestyle=':')
+
+
+# Plotting B_z field in r-z plane (for fixed phi)
+plt.subplot(1, 3, 3)
+plt.pcolormesh(R_mesh, Z_mesh, Bz_field.T * 1000, shading='auto', cmap='plasma')
+plt.colorbar(label='B_z (mT)')
+plt.title(f'B_z Field (phi={fixed_phi:.2f} rad)')
+plt.xlabel('r (mm)')
+plt.ylabel('z (mm)')
+plt.axhline(z_magnet_start * 1000, color='red', linestyle='--')
+plt.axhline(z_magnet_end * 1000, color='red', linestyle='--')
+plt.axvline(R_magnet_outer * 1000, color='orange', linestyle=':')
+
+plt.tight_layout()
+plt.show()
+
+print("\n--- Tips for Trial and Error Optimization ---")
+print("1. **Adjust `r_positions`, `z_positions`, `fixed_phi`:** Define the region of interest for your observation points.")
+print("2. **Vary `R_magnet_outer`, `z_magnet_start`, `z_magnet_end`:** Change the magnet's physical dimensions at the top of the script.")
+print("3. **Iterate Azimuthal Position:** If `B_phi` behavior is critical, you might need to make `phi_positions` a grid and calculate a 3D field (r, phi, z). This will further increase computation.")
+print("4. **Refine Integration Points:** For faster initial trials, reduce `num_phi_prime_points`, `num_r_prime_points`, `num_z_prime_points` (e.g., to 20-30 each). For final, precise results, increase them (e.g., to 100-200 each).")
+print("5. **Analyze Plots:** Look for maxima, minima, specific field gradients, or regions where components are dominant. Plotting 1D slices or vector fields might also be useful.")
+print("6. **Automate:** For extensive optimization, consider using an optimization library (e.g., SciPy's `optimize` module with a custom objective function) instead of manual trial and error, but this requires a clear objective function (e.g., maximize B_z at a certain point, minimize B_r over a region).")
