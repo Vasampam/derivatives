@@ -1,0 +1,118 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%
+% Welcome to Overleaf --- just edit your LaTeX on the left,
+% and we'll compile it for you on the right. If you open the
+% 'Share' menu, you can invite other users to edit at the same
+% time. See www.overleaf.com/learn for more info. Enjoy!
+%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%\documentclass{article}
+%begin{document}
+%First document. This is a simple example, with no 
+%extra parameters or packages included.
+%\end{document}
+
+
+
+\documentclass{article}
+\begin{document}
+Subscripts in math mode are written as $a_b$ and superscripts are written as $a^b$. These can be combined and nested to write expressions such as
+
+\[ T^{i_1 i_2 \dots i_p}_{j_1 j_2 \dots j_q} = T(x^{i_1},\dots,x^{i_p},e_{j_1},\dots,e_{j_q}) \]
+ 
+We write integrals using $\int$ and fractions using $\frac{a}{b}$. Limits are placed on integrals using superscripts and subscripts:
+
+\[ \int_0^1 \int_0^2 \frac{dx}{e^x} =  \frac{e-1}{e} \]
+
+Lower case Greek letters are written as $\omega$ $\delta$ etc. while upper case Greek letters are written as $\Omega$ $\Delta$.
+
+
+
+\begin{equation}
+\mathbf{p}=\int R\mathbf{\hat{r}}\frac{q}{2\pi R}\cos(2\phi)Rd\phi \\ = \frac{Rq}{2\pi}\mathbf{\hat{r}}\int_{0}^{2\pi} \cos(2\phi)d\phi = 0
+\end{equation}
+
+
+
+Mathematical operators are prefixed with a backslash as $\sin(\beta)$, $\cos(\alpha)$, $\log(x)$ etc.
+
+
+
+\break
+
+\usepackage{amsmath}
+
+
+
+$$ \frac{\mu_o M_s}{4\pi}  $$
+
+
+\begin{align}
+$$ \mathbf{g}(r,\phi,z,r',\phi',z') &= \sqrt{{\frac{1}{r^2+r'^2-2rr'\cos(\phi-\phi')+(z-z')^2 )}}}$$    
+\end{align}
+\vspace{5mm} %5mm vertical space
+\begin{align*}
+$$\mathbf{B_r} &= \frac{\mu_o M_sr'}{4\pi} \int_{z_1}^{z_2} \int_{0}^{2\pi} 
+\cos(\phi') \left[ r - r' \cos(\phi - \phi') \right] \times g^3(r,\phi,z,r',\phi',z') \, d\phi'\, dz'$$ 
+\end{align*}
+
+
+
+\begin{align*}
+$$\mathbf{B_\phi} &= \frac{\mu_o M_sr'^2}{4\pi} \int_{z_1}^{z_2} \int_{0}^{2\pi} 
+\cos(\phi') \times \left[\sin(\phi - \phi') \right] g^3(r,\phi,z,r',\phi',z') \, d\phi'\,dz'$$ 
+\end{align*}
+
+\vspace{5mm} %5mm vertical space
+
+\begin{align*}
+$$\mathbf{B_z} &= \frac{\mu_o M_sr'}{4\pi} \int_{z_1}^{z_2} \int_{0}^{2\pi} 
+\cos(\phi') \left[ z - z' \right] \times g^3(r,\phi,z,r',\phi',z') \, d\phi'\, dz'$$ 
+\end{align*}
+
+\break
+XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+\vspace{5mm} %5mm vertical space
+
+\begin{align*}
+$$\mathbf{F}(x,y,z,x_m,y_1,y_2,z_k) &= \frac{(y-y_1)+\sqrt{[(x-x_m)^2+(y-y_1)^2+(z-z_k)^2]}}  
+                                          {(y-y_2)+\sqrt{[(x-x_m)^2+(y-y_2)^2+(z-z_k)^2]}}$$
+\end{align*}
+
+\vspace{5mm} %5mm vertical space
+
+\begin{align*}
+$$\mathbf{B_x} &= \frac{\mu_o M_s}{4\pi} \sum_{k=1}^{2}\sum_{m=1}^{2} (-1)^(k+m) ln [F(x,y,z,x_m,y_1,y_2,z_k)]$$
+\end{align*}
+
+\vspace{5mm} %5mm vertical space
+YYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY
+\vspace{5mm} %5mm vertical space
+
+\begin{align*}
+$$\mathbf{H}(x,y,z,x_1,x_2,y_m,z_k) &= \frac{(x-x_1)+\sqrt{[(x-x_1)^2+(y-y_m)^2+(z-z_k)^2]}}  
+                                          {(x-x_2)+\sqrt{[(x-x_2)^2+(y-y_m)^2+(z-z_k)^2]}}$$
+\end{align*}
+
+\vspace{5mm} %5mm vertical space
+
+\begin{align*}
+$$\mathbf{B_y} &= \frac{\mu_o M_s}{4\pi} \sum_{k=1}^{2}\sum_{m=1}^{2} (-1)^(k+m) ln [H(x,y,z,x_1,x_2,y_m,z_k)]$$
+\end{align*}
+
+\vspace{5mm} %5mm vertical space
+ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ
+\vspace{5mm} %5mm vertical space
+
+\begin{align*}
+$$\mathbf{G}(x,y,z,x_n,y_m,z_k) &= \frac{1}{\sqrt{[(x-x_n)^2+(y-y_m)^2+(z-z_k)^2]}}
+\end{align*}$$
+
+\vspace{5mm} %5mm vertical space
+
+\begin{align*}
+$$\mathbf{B_z} &= \frac{\mu_o M_s}{4\pi} \sum_{k=1}^{2}\sum_{n=1}^{2}\sum_{m=1}^{2} (-1)^(k+n+m) \times \arctan [\frac{(x-x_n)(y-y_m)}{(z-z_k)}g(x,y,z,x_n,y_m,z_k)]$$
+\end{align*}
+
+
+\end{document}
