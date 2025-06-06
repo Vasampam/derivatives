@@ -1,0 +1,238 @@
+import numpy as np
+from scipy.integrate import tplquad
+import matplotlib.pyplot as plt
+import time
+from mpl_toolkits.mplot3d import Axes3D # For potential future 3D visualizations
+from matplotlib.colors import Normalize # For consistent color scaling
+
+# --- 1. Physical Constants and Magnet Parameters (Consistent SI Units) ---
+mu_o = 4 * np.pi * 1e-7  # Permeability of free space (H/m)
+M_s = 4.3 * 10**5        # Magnetization (A/m)
+
+# Solid Disc Magnet Geometry (Defining its outer radius and height)
+R_magnet_outer = 2.54e-2 # Outer radius of the solid disc magnet (meters) - converted from 2.54 cm
+z_magnet_start = -25e-3  # Start z-coordinate of the magnet (meters) - converted from -25 mm
+z_magnet_end = 25e-3     # End z-coordinate of the magnet (meters) - converted from 25 mm
+
+# The common prefactor for all integrals, as r' is now an integration variable.
+common_prefactor = (mu_o * M_s) / (4 * np.pi)
+
+# ====================================================================
+# Core Helper Function: g(r,phi,z,r',phi',z') - Pure NumPy (CPU)
+# ====================================================================
+def g_func_np(r_obs, phi_obs, z_obs, r_prime, phi_prime, z_prime):
+    """
+    Calculates g = 1 / distance, where distance is between observation (r,phi,z)
+    and source (r_prime, phi_prime, z_prime). Pure NumPy for CPU.
+    """
+    d_squared = r_obs**2 + r_prime**2 - 2 * r_obs * r_prime * np.cos(phi_obs - phi_prime) + (z_obs - z_prime)**2
+    
+    # Handle potential numerical issues (avoid division by zero or sqrt of negative)
+    if d_squared < 1e-20: # A very small threshold
+        return 0.0 # Effectively makes integrand 0 at the singularity
+    
+    return 1.0 / np.sqrt(d_squared)
+
+# ====================================================================
+# Integrand Functions for SciPy's tplquad (CPU-based)
+# Each integrand includes the r_prime factor from dV' = r' dr' dphi' dz'
+# ====================================================================
+def integrand_Br_scipy_solid(phi_prime, r_prime, z_prime, r_obs, phi_obs, z_obs):
+    g_val = g_func_np(r_obs, phi_obs, z_obs, r_prime, phi_prime, z_prime)
+    return np.cos(phi_prime) * (r_obs - r_prime * np.cos(phi_obs - phi_prime)) * (g_val**3) * r_prime
+
+def integrand_Bphi_scipy_solid(phi_prime, r_prime, z_prime, r_obs, phi_obs, z_obs):
+    g_val = g_func_np(r_obs, phi_obs, z_obs, r_prime, phi_prime, z_prime)
+    return np.cos(phi_prime) * np.sin(phi_obs - phi_prime) * (g_val**3) * r_prime
+
+def integrand_Bz_scipy_solid(phi_prime, r_prime, z_prime, r_obs, phi_obs, z_obs):
+    g_val = g_func_np(r_obs, phi_obs, z_obs, r_prime, phi_prime, z_prime)
+    return np.cos(phi_prime) * (z_obs - z_prime) * (g_val**3) * r_prime
+
+# ====================================================================
+# Function to Calculate ALL B Components at a Single Point (SciPy - CPU)
+# ====================================================================
+def calculate_B_field_scipy_solid(r_obs, phi_obs, z_obs):
+    """
+    Calculates Br, Bphi, Bz at a single point (r,phi,z) for a solid disc magnet
+    using SciPy's tplquad (CPU-based).
+    """
+    phi_prime_lower_limit = lambda r_prime_dummy, z_prime_dummy: 0.0
+    phi_prime_upper_limit = lambda r_prime_dummy, z_prime_dummy: 2 * np.pi
+    r_prime_lower_limit = lambda z_prime_dummy: 0.0
+    r_prime_upper_limit = lambda z_prime_dummy: R_magnet_outer
+    z_prime_lower_limit = z_magnet_start
+    z_prime_upper_limit = z_magnet_end
+
+    args_tuple = (r_obs, phi_obs, z_obs)
+
+    # Br Calculation
+    integral_Br, _ = tplquad(integrand_Br_scipy_solid, 
+                             z_prime_lower_limit, z_prime_upper_limit,   # x_outermost: z_prime
+                             r_prime_lower_limit, r_prime_upper_limit,   # y_mid: r_prime
+                             phi_prime_lower_limit, phi_prime_upper_limit, # z_innermost: phi_prime
+                             args=args_tuple)
+    Br = common_prefactor * integral_Br
+
+    # Bphi Calculation
+    integral_Bphi, _ = tplquad(integrand_Bphi_scipy_solid, 
+                               z_prime_lower_limit, z_prime_upper_limit,
+                               r_prime_lower_limit, r_prime_upper_limit,
+                               phi_prime_lower_limit, phi_prime_upper_limit,
+                               args=args_tuple)
+    Bphi = common_prefactor * integral_Bphi
+
+    # Bz Calculation
+    integral_Bz, _ = tplquad(integrand_Bz_scipy_solid, 
+                             z_prime_lower_limit, z_prime_upper_limit,
+                             r_prime_lower_limit, r_prime_upper_limit,
+                             phi_prime_lower_limit, phi_prime_upper_limit,
+                             args=args_tuple)
+    Bz = common_prefactor * integral_Bz
+
+    return Br, Bphi, Bz
+
+# ====================================================================
+# Generating Field for Trial and Error Optimization (Varying r, phi, z)
+# This uses the CPU-based SciPy function
+# ====================================================================
+print("\n--- Generating Magnetic Field Over a 3D Grid for Optimization (CPU Version) ---")
+
+# Define grid for observation points (adjust ranges and numbers as needed for your trials)
+r_positions = np.linspace(0.001, 0.05, 5) # From 1mm to 50mm, 5 points
+phi_positions = np.linspace(0, 2 * np.pi, 5) # Full circle, 5 points
+z_positions = np.linspace(-0.06, 0.06, 5) # From -60mm to 60mm, 5 points
+
+# Initialize 3D arrays to store field components
+Br_field = np.zeros((len(r_positions), len(phi_positions), len(z_positions)))
+Bphi_field = np.zeros((len(r_positions), len(phi_positions), len(z_positions)))
+Bz_field = np.zeros((len(r_positions), len(phi_positions), len(z_positions)))
+B_magnitude_field = np.zeros((len(r_positions), len(phi_positions), len(z_positions))) # Also calculate magnitude
+
+num_total_points = len(r_positions) * len(phi_positions) * len(z_positions)
+print(f"Calculating field over a {len(r_positions)}x{len(phi_positions)}x{len(z_positions)} grid ({num_total_points} points) using SciPy (CPU)...")
+print("WARNING: This will take a very significant amount of time. Consider starting with smaller grids.")
+
+field_calc_start_time = time.time()
+
+# Loop through each observation point in the 3D grid
+current_point_idx = 0
+for i, r_obs_val in enumerate(r_positions):
+    for j, phi_obs_val in enumerate(phi_positions):
+        for k, z_obs_val in enumerate(z_positions):
+            br, bphi, bz = calculate_B_field_scipy_solid(r_obs_val, phi_obs_val, z_obs_val)
+            Br_field[i, j, k] = br
+            Bphi_field[i, j, k] = bphi
+            Bz_field[i, j, k] = bz
+            B_magnitude_field[i, j, k] = np.sqrt(br**2 + bphi**2 + bz**2)
+            
+            current_point_idx += 1
+            if current_point_idx % 10 == 0 or current_point_idx == num_total_points: # Print progress
+                print(f"  Calculated {current_point_idx}/{num_total_points} points. r={r_obs_val*1000:.1f}mm, phi={np.degrees(phi_obs_val):.1f}deg, z={z_obs_val*1000:.1f}mm")
+
+field_calc_end_time = time.time()
+print(f"\nGrid calculation complete in {field_calc_end_time - field_calc_start_time:.2f} seconds.")
+
+# ====================================================================
+# Plotting for Visualization (2D Slices from 3D Data)
+# ====================================================================
+
+# Set common color limits for consistent visualization across components/slices
+# This helps in comparing magnitudes visually. Adjust these based on your expected field range.
+vmax_br = np.max(np.abs(Br_field)) * 0.8 # Max absolute value for Br (adjust as needed)
+vmax_bphi = np.max(np.abs(Bphi_field)) * 0.8
+vmax_bz = np.max(np.abs(Bz_field)) * 0.8
+vmax_bmag = np.max(B_magnitude_field) * 0.8
+
+# Plotting specific slices
+plt.figure(figsize=(18, 12)) # Larger figure for multiple subplots
+
+# --- r-z plane slice (at a chosen phi) ---
+# Find the index for a desired phi value (e.g., phi = 0 or phi = pi/2)
+plot_phi_val_deg = 0 # Degrees
+plot_phi_idx = np.argmin(np.abs(phi_positions - np.radians(plot_phi_val_deg)))
+chosen_phi_rad = phi_positions[plot_phi_idx]
+
+R_mesh_rz, Z_mesh_rz = np.meshgrid(r_positions * 1000, z_positions * 1000)
+
+plt.subplot(2, 3, 1) # 2 rows, 3 columns, 1st subplot
+plt.pcolormesh(R_mesh_rz, Z_mesh_rz, Br_field[:, plot_phi_idx, :].T * 1000, shading='auto', cmap='coolwarm', vmin=-vmax_br*1000, vmax=vmax_br*1000)
+plt.colorbar(label='B_r (mT)')
+plt.title(f'B_r (r-z plane at phi={np.degrees(chosen_phi_rad):.0f} deg)')
+plt.xlabel('r (mm)')
+plt.ylabel('z (mm)')
+plt.axhline(z_magnet_start * 1000, color='red', linestyle='--', label='Magnet Ends')
+plt.axhline(z_magnet_end * 1000, color='red', linestyle='--')
+plt.axvline(R_magnet_outer * 1000, color='orange', linestyle=':', label='Magnet Radius')
+plt.legend()
+
+plt.subplot(2, 3, 2)
+plt.pcolormesh(R_mesh_rz, Z_mesh_rz, Bphi_field[:, plot_phi_idx, :].T * 1000, shading='auto', cmap='viridis', vmin=0, vmax=vmax_bphi*1000)
+plt.colorbar(label='B_phi (mT)')
+plt.title(f'B_phi (r-z plane at phi={np.degrees(chosen_phi_rad):.0f} deg)')
+plt.xlabel('r (mm)')
+plt.ylabel('z (mm)')
+plt.axhline(z_magnet_start * 1000, color='red', linestyle='--')
+plt.axhline(z_magnet_end * 1000, color='red', linestyle='--')
+plt.axvline(R_magnet_outer * 1000, color='orange', linestyle=':')
+
+plt.subplot(2, 3, 3)
+plt.pcolormesh(R_mesh_rz, Z_mesh_rz, Bz_field[:, plot_phi_idx, :].T * 1000, shading='auto', cmap='plasma', vmin=0, vmax=vmax_bz*1000)
+plt.colorbar(label='B_z (mT)')
+plt.title(f'B_z (r-z plane at phi={np.degrees(chosen_phi_rad):.0f} deg)')
+plt.xlabel('r (mm)')
+plt.ylabel('z (mm)')
+plt.axhline(z_magnet_start * 1000, color='red', linestyle='--')
+plt.axhline(z_magnet_end * 1000, color='red', linestyle='--')
+plt.axvline(R_magnet_outer * 1000, color='orange', linestyle=':')
+
+
+# --- r-phi plane slice (at a chosen z) ---
+# Find the index for a desired z value (e.g., z = 0 for magnet center, or z = z_magnet_end)
+plot_z_val_mm = 0 # Millimeters
+plot_z_idx = np.argmin(np.abs(z_positions - plot_z_val_mm * 1e-3))
+chosen_z_m = z_positions[plot_z_idx]
+
+R_mesh_rp, Phi_mesh_rp = np.meshgrid(r_positions * 1000, np.degrees(phi_positions)) # Plot phi in degrees
+
+plt.subplot(2, 3, 4) # 2nd row, 1st subplot
+plt.pcolormesh(R_mesh_rp, Phi_mesh_rp, Br_field[:, :, plot_z_idx].T * 1000, shading='auto', cmap='coolwarm', vmin=-vmax_br*1000, vmax=vmax_br*1000)
+plt.colorbar(label='B_r (mT)')
+plt.title(f'B_r (r-phi plane at z={chosen_z_m*1000:.0f} mm)')
+plt.xlabel('r (mm)')
+plt.ylabel('phi (deg)')
+plt.axvline(R_magnet_outer * 1000, color='orange', linestyle=':', label='Magnet Radius')
+plt.legend()
+
+
+plt.subplot(2, 3, 5)
+plt.pcolormesh(R_mesh_rp, Phi_mesh_rp, Bphi_field[:, :, plot_z_idx].T * 1000, shading='auto', cmap='viridis', vmin=0, vmax=vmax_bphi*1000)
+plt.colorbar(label='B_phi (mT)')
+plt.title(f'B_phi (r-phi plane at z={chosen_z_m*1000:.0f} mm)')
+plt.xlabel('r (mm)')
+plt.ylabel('phi (deg)')
+plt.axvline(R_magnet_outer * 1000, color='orange', linestyle=':')
+
+
+plt.subplot(2, 3, 6)
+plt.pcolormesh(R_mesh_rp, Phi_mesh_rp, Bz_field[:, :, plot_z_idx].T * 1000, shading='auto', cmap='plasma', vmin=0, vmax=vmax_bz*1000)
+plt.colorbar(label='B_z (mT)')
+plt.title(f'B_z (r-phi plane at z={chosen_z_m*1000:.0f} mm)')
+plt.xlabel('r (mm)')
+plt.ylabel('phi (deg)')
+plt.axvline(R_magnet_outer * 1000, color='orange', linestyle=':')
+
+plt.tight_layout()
+plt.show()
+
+print("\n--- Strategy for Parameter Study and Optimization ---")
+print("1.  **Define Parameter Ranges:** Use `np.linspace` to set the `r_positions`, `phi_positions`, and `z_positions` that cover your areas of interest for the observation point.")
+print("2.  **Adjust Grid Density:** For initial broad studies, keep the number of points in each `linspace` small (e.g., 3-5). For more detailed analysis, increase the points, but be mindful of computation time.")
+print("3.  **Iterate Magnet Dimensions:** At the top of the script, modify `R_magnet_outer`, `z_magnet_start`, `z_magnet_end` to explore different magnet geometries.")
+print("4.  **Analyze 2D Slices:** The generated plots will show how each field component varies across different planes. Look for: ")
+print("    * **Maxima/Minima:** Where are the field strengths highest or lowest?")
+print("    * **Gradients:** How quickly does the field change in different directions? (e.g., for force calculation)")
+print("    * **Field Direction:** By observing B_r, B_phi, B_z together, you can infer the overall field vector direction.")
+print("    * **Symmetry:** How does the field behave with `phi`? For a uniformly magnetized disc aligned with the z-axis, B_r and B_z should be independent of `phi` (azimuthally symmetric if `M` is z-aligned), while B_phi should be zero if the magnetization is purely axial. If your magnetization is complex or has a `cos(phi')` term, then `B_phi` and `phi` dependence will appear.")
+print("5.  **Data Extraction:** You can programmatically search through `Br_field`, `Bphi_field`, `Bz_field`, or `B_magnitude_field` to find specific points that meet your optimization criteria (e.g., `np.max(Bz_field)`, `np.argmin(B_magnitude_field)` in a certain region).")
+print("6.  **Advanced Optimization:** For truly automated optimization, you'd define an objective function (e.g., `def objective(params): ... return -B_z_at_target_point`) and use `scipy.optimize` methods to find the `params` (magnet dimensions, observation position) that optimize it.")
