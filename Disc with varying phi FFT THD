@@ -1,0 +1,221 @@
+import numpy as np
+from scipy.integrate import tplquad
+import matplotlib.pyplot as plt
+import time
+from scipy.fft import fft, fftfreq # For FFT calculations
+
+# --- 1. Physical Constants and Magnet Parameters (Same as above) ---
+mu_o = 4 * np.pi * 1e-7  # Permeability of free space (H/m)
+M_s = 4.3 * 10**5        # Magnetization (A/m)
+
+R_magnet_outer = 2.54e-2 
+z_magnet_start = -25e-3  
+z_magnet_end = 25e-3     
+
+common_prefactor = (mu_o * M_s) / (4 * np.pi)
+
+# --- Core Helper Function: g_func (Same as above) ---
+def g_func(r_obs, phi_obs, z_obs, r_prime, phi_prime, z_prime):
+    d_squared = r_obs**2 + r_prime**2 - 2 * r_obs * r_prime * np.cos(phi_obs - phi_prime) + (z_obs - z_prime)**2
+    if d_squared < 1e-20: return 0.0
+    return 1.0 / np.sqrt(d_squared)
+
+# --- Integrand Functions (Same as above) ---
+def integrand_Br_scipy_solid(phi_prime, r_prime, z_prime, r_obs, phi_obs, z_obs):
+    g_val = g_func(r_obs, phi_obs, z_obs, r_prime, phi_prime, z_prime)
+    return np.cos(phi_prime) * (r_obs - r_prime * np.cos(phi_obs - phi_prime)) * (g_val**3) * r_prime
+
+def integrand_Bphi_scipy_solid(phi_prime, r_prime, z_prime, r_obs, phi_obs, z_obs):
+    g_val = g_func(r_obs, phi_obs, z_obs, r_prime, phi_prime, z_prime)
+    return np.cos(phi_prime) * np.sin(phi_obs - phi_prime) * (g_val**3) * r_prime
+
+def integrand_Bz_scipy_solid(phi_prime, r_prime, z_prime, r_obs, phi_obs, z_obs):
+    g_val = g_func(r_obs, phi_obs, z_obs, r_prime, phi_prime, z_prime)
+    return np.cos(phi_prime) * (z_obs - z_prime) * (g_val**3) * r_prime
+
+# --- Function to Calculate ALL B Components at a Single Observation Point (Same as above) ---
+def calculate_B_field_scipy_solid(r_obs, phi_obs, z_obs):
+    phi_prime_lower_limit = lambda r_prime_dummy, z_prime_dummy: 0.0
+    phi_prime_upper_limit = lambda r_prime_dummy, z_prime_dummy: 2 * np.pi
+    r_prime_lower_limit = lambda z_prime_dummy: 0.0
+    r_prime_upper_limit = lambda z_magnet_dummy: R_magnet_outer
+    z_prime_lower_limit = z_magnet_start
+    z_prime_upper_limit = z_magnet_end
+    args_tuple = (r_obs, phi_obs, z_obs)
+
+    integral_Br, _ = tplquad(integrand_Br_scipy_solid, z_prime_lower_limit, z_prime_upper_limit, r_prime_lower_limit, r_prime_upper_limit, phi_prime_lower_limit, phi_prime_upper_limit, args=args_tuple)
+    integral_Bphi, _ = tplquad(integrand_Bphi_scipy_solid, z_prime_lower_limit, z_prime_upper_limit, r_prime_lower_limit, r_prime_upper_limit, phi_prime_lower_limit, phi_prime_upper_limit, args=args_tuple)
+    integral_Bz, _ = tplquad(integrand_Bz_scipy_solid, z_prime_lower_limit, z_prime_upper_limit, r_prime_lower_limit, r_prime_upper_limit, phi_prime_lower_limit, phi_prime_upper_limit, args=args_tuple)
+
+    Br = common_prefactor * integral_Br
+    Bphi = common_prefactor * integral_Bphi
+    Bz = common_prefactor * integral_Bz
+    return Br, Bphi, Bz
+
+# ====================================================================
+# Functions for Signal Analysis: Amplitude, THD, SNR
+# ====================================================================
+
+def calculate_amplitude(signal):
+    """Calculates peak-to-peak amplitude."""
+    return np.max(signal) - np.min(signal)
+
+def calculate_thd(signal, sampling_rate_rad=None):
+    """
+    Calculates Total Harmonic Distortion (THD) for a periodic signal.
+    Assumes the signal covers at least one full period.
+    sampling_rate_rad: Number of samples per 2*pi radians. If None, assumes 2*pi period.
+    """
+    N = len(signal)
+    if N < 2: return np.nan # Not enough points for FFT
+
+    # Perform FFT
+    yf = fft(signal)
+    xf = fftfreq(N, 1/N if sampling_rate_rad is None else 2*np.pi/sampling_rate_rad)
+    
+    # Calculate magnitude spectrum (one-sided)
+    # Only take first half for positive frequencies, ignoring DC component (index 0)
+    magnitudes = 2.0/N * np.abs(yf[1:N//2])
+    frequencies = np.abs(xf[1:N//2]) # Absolute value for frequencies
+
+    if len(magnitudes) == 0: return np.nan
+
+    # Find fundamental frequency (highest peak, excluding DC)
+    fundamental_idx = np.argmax(magnitudes)
+    fundamental_power = magnitudes[fundamental_idx]**2
+
+    # Calculate power of harmonics (all other components)
+    harmonic_power_sum = np.sum(magnitudes**2) - fundamental_power
+
+    if fundamental_power == 0: return np.nan # Avoid division by zero
+    
+    thd = np.sqrt(harmonic_power_sum / fundamental_power)
+    return thd
+
+def calculate_snr(signal, noise_level_tesla=0.0):
+    """
+    Calculates Signal-to-Noise Ratio (SNR).
+    Assumes added noise, otherwise, you need a method to separate signal from noise.
+    """
+    # If no explicit noise added, we can interpret 'noise' as everything
+    # that is not the fundamental frequency (similar to THD approach).
+    # For a clean simulation, you might want to add synthetic noise to test SNR.
+
+    signal_power = np.mean(signal**2) # Total power of the measured signal
+
+    # If you have a 'true' clean signal and 'noise' added:
+    # noise_power = np.mean( (actual_noise)**2 )
+    
+    # For this simulation, if we assume numerical error as 'noise' or want to test
+    # with synthetic noise:
+    if noise_level_tesla > 0:
+        # Add random noise for demonstration
+        # np.random.seed(42) # for reproducibility
+        noise = np.random.normal(0, noise_level_tesla, len(signal))
+        signal_with_noise = signal + noise
+        
+        # Power of the original signal (before adding external noise)
+        true_signal_power = np.mean(signal**2)
+        # Power of the added noise
+        added_noise_power = np.mean(noise**2)
+        
+        if added_noise_power == 0: return np.nan # Avoid division by zero
+        snr_linear = true_signal_power / added_noise_power
+        snr_db = 10 * np.log10(snr_linear)
+        return snr_db
+    else:
+        # Without explicit noise, it's hard to define SNR for a simulated signal.
+        # This could be interpreted as comparing fundamental power to harmonic power,
+        # but that's essentially THD.
+        return np.nan # Not well-defined without a noise model
+
+# ====================================================================
+# Main Execution for Waveform Plot and Analysis
+# ====================================================================
+
+# --- Define Varying Parameters for a "Waveform" Plot (Varying PHI) ---
+fixed_r_obs = 2.0e-2   # Fixed radial distance (e.g., 20 mm)
+fixed_z_obs = 0.0e-3   # Fixed axial distance (e.g., at magnet center, 0 mm)
+phi_observation_points = np.linspace(0, 2 * np.pi, 100) # More points for smoother sine wave and better FFT
+
+# --- Calculate B_r, B_phi, B_z for Each Point ---
+Br_values = np.zeros_like(phi_observation_points)
+Bphi_values = np.zeros_like(phi_observation_points)
+Bz_values = np.zeros_like(phi_observation_points)
+
+print(f"\nCalculating B-field components for {len(phi_observation_points)} azimuthal points...")
+print(f"Observation Point: r = {fixed_r_obs*1000:.1f} mm, z = {fixed_z_obs*1000:.1f} mm")
+
+start_time_phi_calc = time.time()
+for i, phi_val in enumerate(phi_observation_points):
+    br, bphi, bz = calculate_B_field_scipy_solid(fixed_r_obs, phi_val, fixed_z_obs)
+    Br_values[i] = br
+    Bphi_values[i] = bphi
+    Bz_values[i] = bz
+    
+    if (i + 1) % 10 == 0 or (i + 1) == len(phi_observation_points):
+        print(f"  Calculated point {i+1}/{len(phi_observation_points)}: phi={np.degrees(phi_val):.1f} deg")
+
+end_time_phi_calc = time.time()
+print(f"\nAzimuthal sweep calculation complete in {end_time_phi_calc - start_time_phi_calc:.2f} seconds.")
+
+# --- Perform Signal Analysis ---
+print("\n--- Signal Analysis ---")
+
+# Analyze B_phi as it's more likely to show a sinusoidal pattern due to the cos(phi') term
+print("\nAnalyzing B_phi signal:")
+amplitude_bphi = calculate_amplitude(Bphi_values)
+print(f"  Peak-to-Peak Amplitude (B_phi): {amplitude_bphi:.4e} T ({amplitude_bphi*1000:.2f} mT)")
+
+thd_bphi = calculate_thd(Bphi_values)
+print(f"  Total Harmonic Distortion (THD) of B_phi: {thd_bphi:.4f} (ratio, lower is better)")
+
+# To demonstrate SNR, let's add some artificial noise to B_phi
+noise_standard_deviation = 1e-6 # Example noise level in Tesla (1 microTesla)
+np.random.seed(0) # For reproducibility
+Bphi_noisy = Bphi_values + np.random.normal(0, noise_standard_deviation, len(Bphi_values))
+
+snr_bphi = calculate_snr(Bphi_values, noise_standard_deviation) # Pass the original clean signal and noise level
+print(f"  Signal-to-Noise Ratio (SNR) of B_phi (with added noise): {snr_bphi:.2f} dB (higher is better)")
+
+
+# You can do the same for Br and Bz, but expect them to be flat/constant
+# for an axially magnetized disc (unless there are formula specific dependencies).
+print("\nAnalyzing B_r signal:")
+amplitude_br = calculate_amplitude(Br_values)
+print(f"  Peak-to-Peak Amplitude (B_r): {amplitude_br:.4e} T ({amplitude_br*1000:.2f} mT)")
+thd_br = calculate_thd(Br_values)
+print(f"  Total Harmonic Distortion (THD) of B_r: {thd_br:.4f}")
+
+print("\nAnalyzing B_z signal:")
+amplitude_bz = calculate_amplitude(Bz_values)
+print(f"  Peak-to-Peak Amplitude (B_z): {amplitude_bz:.4e} T ({amplitude_bz*1000:.2f} mT)")
+thd_bz = calculate_thd(Bz_values)
+print(f"  Total Harmonic Distortion (THD) of B_z: {thd_bz:.4f}")
+
+
+# --- Plotting the "Waveform" with optional noise ---
+plt.figure(figsize=(12, 8))
+
+plt.subplot(2,1,1) # Top subplot for the field components
+plt.plot(np.degrees(phi_observation_points), Br_values * 1000, label='B_r (mT)', alpha=0.8)
+plt.plot(np.degrees(phi_observation_points), Bphi_values * 1000, label='B_phi (mT)', alpha=0.8)
+plt.plot(np.degrees(phi_observation_points), Bz_values * 1000, label='B_z (mT)', alpha=0.8)
+plt.title(f'Magnetic Field Components vs. Azimuthal Angle (phi)\n'
+          f'at r={fixed_r_obs*1000:.1f} mm, z={fixed_z_obs*1000:.1f} mm')
+plt.xlabel('Azimuthal Angle, phi (degrees)')
+plt.ylabel('Magnetic Field (mT)')
+plt.grid(True, linestyle='--', alpha=0.6)
+plt.legend()
+
+plt.subplot(2,1,2) # Bottom subplot for noisy B_phi
+plt.plot(np.degrees(phi_observation_points), Bphi_values * 1000, 'b--', label='B_phi (Clean, mT)', alpha=0.6)
+plt.plot(np.degrees(phi_observation_points), Bphi_noisy * 1000, 'r-', label='B_phi (Noisy, mT)', alpha=0.8)
+plt.title(f'B_phi with Added Noise (Std Dev: {noise_standard_deviation*1e6:.1f} uT)')
+plt.xlabel('Azimuthal Angle, phi (degrees)')
+plt.ylabel('Magnetic Field (mT)')
+plt.grid(True, linestyle='--', alpha=0.6)
+plt.legend()
+
+plt.tight_layout()
+plt.show()
