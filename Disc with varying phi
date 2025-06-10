@@ -1,0 +1,126 @@
+import numpy as np
+from scipy.integrate import tplquad
+import matplotlib.pyplot as plt
+import time # For timing calculations, as this can still be slow
+
+# --- 1. Physical Constants and Magnet Parameters (Consistent SI Units) ---
+mu_o = 4 * np.pi * 1e-7  # Permeability of free space (H/m)
+M_s = 4.3 * 10**5        # Magnetization (A/m)
+
+# Solid Disc Magnet Geometry (Defining its outer radius and height)
+R_magnet_outer = 2.54e-2 # Outer radius of the solid disc magnet (meters)
+z_magnet_start = -25e-3  # Start z-coordinate of the magnet (meters)
+z_magnet_end = 25e-3     # End z-coordinate of the magnet (meters)
+
+# The common prefactor for all integrals, as r' is now an integration variable.
+common_prefactor = (mu_o * M_s) / (4 * np.pi)
+
+# ====================================================================
+# Core Helper Function: g(r,phi,z,r',phi',z') - Same for all components
+# ====================================================================
+def g_func(r_obs, phi_obs, z_obs, r_prime, phi_prime, z_prime):
+    """
+    Calculates g = 1 / distance, where distance is between observation (r,phi,z)
+    and source (r_prime, phi_prime, z_prime).
+    """
+    d_squared = r_obs**2 + r_prime**2 - 2 * r_obs * r_prime * np.cos(phi_obs - phi_prime) + (z_obs - z_prime)**2
+    
+    if d_squared < 1e-20:
+        return 0.0
+    return 1.0 / np.sqrt(d_squared)
+
+# ====================================================================
+# Integrand Functions for ALL B components (for SciPy's tplquad)
+# These include the r' from the volume element dV' = r' dr' dphi' dz'
+# ====================================================================
+def integrand_Br_scipy_solid(phi_prime, r_prime, z_prime, r_obs, phi_obs, z_obs):
+    g_val = g_func(r_obs, phi_obs, z_obs, r_prime, phi_prime, z_prime)
+    return np.cos(phi_prime) * (r_obs - r_prime * np.cos(phi_obs - phi_prime)) * (g_val**3) * r_prime
+
+def integrand_Bphi_scipy_solid(phi_prime, r_prime, z_prime, r_obs, phi_obs, z_obs):
+    """
+    The integrand for B_phi. Note: for an axially magnetized disc, B_phi should ideally be zero
+    due to symmetry if the source magnetization is purely axial (M_s_z) and not M_s_r or M_s_phi.
+    If your formulas imply M_s_r*cos(phi') for the source, then B_phi will have a non-zero value.
+    This implementation assumes M_s is related to cos(phi') as per your previous formula structure.
+    """
+    g_val = g_func(r_obs, phi_obs, z_obs, r_prime, phi_prime, z_prime)
+    return np.cos(phi_prime) * np.sin(phi_obs - phi_prime) * (g_val**3) * r_prime
+
+def integrand_Bz_scipy_solid(phi_prime, r_prime, z_prime, r_obs, phi_obs, z_obs):
+    """
+    The integrand for B_z.
+    """
+    g_val = g_func(r_obs, phi_obs, z_obs, r_prime, phi_prime, z_prime)
+    return np.cos(phi_prime) * (z_obs - z_prime) * (g_val**3) * r_prime
+
+
+# ====================================================================
+# Function to Calculate ALL B Components at a Single Observation Point (CPU)
+# ====================================================================
+def calculate_B_field_scipy_solid(r_obs, phi_obs, z_obs):
+    """
+    Calculates Br, Bphi, Bz at a single point (r,phi,z) for a solid disc magnet.
+    """
+    phi_prime_lower_limit = lambda r_prime_dummy, z_prime_dummy: 0.0
+    phi_prime_upper_limit = lambda r_prime_dummy, z_prime_dummy: 2 * np.pi
+    r_prime_lower_limit = lambda z_prime_dummy: 0.0
+    r_prime_upper_limit = lambda z_magnet_dummy: R_magnet_outer # Corrected here
+    z_prime_lower_limit = z_magnet_start
+    z_prime_upper_limit = z_magnet_end
+    args_tuple = (r_obs, phi_obs, z_obs)
+
+    integral_Br, _ = tplquad(integrand_Br_scipy_solid, z_prime_lower_limit, z_prime_upper_limit, r_prime_lower_limit, r_prime_upper_limit, phi_prime_lower_limit, phi_prime_upper_limit, args=args_tuple)
+    integral_Bphi, _ = tplquad(integrand_Bphi_scipy_solid, z_prime_lower_limit, z_prime_upper_limit, r_prime_lower_limit, r_prime_upper_limit, phi_prime_lower_limit, phi_prime_upper_limit, args=args_tuple)
+    integral_Bz, _ = tplquad(integrand_Bz_scipy_solid, z_prime_lower_limit, z_prime_upper_limit, r_prime_lower_limit, r_prime_upper_limit, phi_prime_lower_limit, phi_prime_upper_limit, args=args_tuple)
+
+    Br = common_prefactor * integral_Br
+    Bphi = common_prefactor * integral_Bphi
+    Bz = common_prefactor * integral_Bz
+    return Br, Bphi, Bz
+
+# --- 2. Define Varying Parameters for a "Waveform" Plot (Varying PHI) ---
+# Observation points for plotting:
+fixed_r_obs = 2.0e-2   # Fixed radial distance (e.g., 20 mm)
+fixed_z_obs = 0.0e-3   # Fixed axial distance (e.g., at magnet center, 0 mm)
+
+# Let's vary 'phi' (azimuthal angle) over a full circle
+phi_observation_points = np.linspace(0, 2 * np.pi, 50) # 50 points over 360 degrees
+
+# --- 3. Calculate B_r, B_phi, B_z for Each Point along the Phi variation ---
+Br_values = np.zeros_like(phi_observation_points)
+Bphi_values = np.zeros_like(phi_observation_points)
+Bz_values = np.zeros_like(phi_observation_points)
+
+print(f"\nCalculating B-field components for {len(phi_observation_points)} azimuthal points...")
+print(f"Observation Point: r = {fixed_r_obs*1000:.1f} mm, z = {fixed_z_obs*1000:.1f} mm")
+
+start_time_phi_calc = time.time()
+for i, phi_val in enumerate(phi_observation_points):
+    br, bphi, bz = calculate_B_field_scipy_solid(fixed_r_obs, phi_val, fixed_z_obs)
+    Br_values[i] = br
+    Bphi_values[i] = bphi
+    Bz_values[i] = bz
+    
+    # Print progress (optional, but helpful for long calculations)
+    if (i + 1) % 5 == 0 or (i + 1) == len(phi_observation_points):
+        print(f"  Calculated point {i+1}/{len(phi_observation_points)}: phi={np.degrees(phi_val):.1f} deg")
+
+end_time_phi_calc = time.time()
+print(f"\nAzimuthal sweep calculation complete in {end_time_phi_calc - start_time_phi_calc:.2f} seconds.")
+
+# --- 4. Plotting the "Waveform" (Field vs. Phi) ---
+plt.figure(figsize=(12, 7))
+
+plt.plot(np.degrees(phi_observation_points), Br_values * 1000, 'o-', label='B_r (mT)', alpha=0.7)
+plt.plot(np.degrees(phi_observation_points), Bphi_values * 1000, 's-', label='B_phi (mT)', alpha=0.7)
+plt.plot(np.degrees(phi_observation_points), Bz_values * 1000, '^-', label='B_z (mT)', alpha=0.7)
+
+plt.title(f'Magnetic Field Components vs. Azimuthal Angle (phi)\n'
+          f'at r={fixed_r_obs*1000:.1f} mm, z={fixed_z_obs*1000:.1f} mm')
+plt.xlabel('Azimuthal Angle, phi (degrees)')
+plt.ylabel('Magnetic Field (mT)')
+plt.grid(True, linestyle='--', alpha=0.6)
+plt.legend()
+plt.tight_layout()
+plt.show()
