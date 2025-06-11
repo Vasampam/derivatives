@@ -2,38 +2,53 @@ import numpy as np
 from scipy.integrate import tplquad
 import matplotlib.pyplot as plt
 import time
-from scipy.fft import fft, fftfreq # For FFT calculations
+from scipy.fft import fft, fftfreq                           # For FFT calculations
 
-# --- 1. Physical Constants and Magnet Parameters (Same as above) ---
-mu_o = 4 * np.pi * 1e-7  # Permeability of free space (H/m)
-M_s = 4.3 * 10**5        # Magnetization (A/m)
+# --- 1. Physical Constants and Magnet Parameters 
+mu_o = 4 * np.pi * 1e-7                                      # Permeability of free space (H/m)
+M_s = 4.3 * 10 ** 5                                          # Magnetization (A/m)
 
-R_magnet_outer = 2.54e-2 
-z_magnet_start = -25e-3  
-z_magnet_end = 25e-3     
+R_magnet_outer = 2.54e-2                                     # Outer radius of the solid disc magnet (meters) 
+z_magnet_start = -25e-3                                      # Start z-coordinate of the magnet (meters)
+z_magnet_end = 25e-3                                         # End z-coordinate of the magnet (meters)
 
-common_prefactor = (mu_o * M_s) / (4 * np.pi)
+common_prefactor = (mu_o * M_s) / (4 * np.pi)               
 
-# --- Core Helper Function: g_func (Same as above) ---
+# ====================================================================
+# Core Helper Function: g(r,phi,z,r',phi',z') - Pure NumPy (CPU)
+# ==================================================================== 
 def g_func(r_obs, phi_obs, z_obs, r_prime, phi_prime, z_prime):
+    """
+    Calculates g = 1 / distance, where distance is between observation (r,phi,z)
+    and source (r_prime, phi_prime, z_prime). Pure NumPy for CPU.
+    """    
     d_squared = r_obs**2 + r_prime**2 - 2 * r_obs * r_prime * np.cos(phi_obs - phi_prime) + (z_obs - z_prime)**2
-    if d_squared < 1e-20: return 0.0
-    return 1.0 / np.sqrt(d_squared)
+    
+    # Handles potential numerical issues (avoid division by zero or sqrt of negative)
+    if d_squared < 1e-20:                                   # A very small threshold
+        return 0.0                                          # Effectively makes integrand 0 at the singularity
+    
+    return 1.0 / np.sqrt(d_squared)                         
 
-# --- Integrand Functions (Same as above) ---
+# ====================================================================
+# Integrand Functions for SciPy's tplquad (CPU-based)
+# tplquad expects func(z_innermost, y_mid, x_outermost, *args)
+# Here, mapping to: func(phi_prime, r_prime, z_prime, r_obs, phi_obs, z_obs)
+# Each integrand includes the r_prime factor from dV' = r' dr' dphi' dz'
+# ====================================================================
 def integrand_Br_scipy_solid(phi_prime, r_prime, z_prime, r_obs, phi_obs, z_obs):
     g_val = g_func(r_obs, phi_obs, z_obs, r_prime, phi_prime, z_prime)
     return np.cos(phi_prime) * (r_obs - r_prime * np.cos(phi_obs - phi_prime)) * (g_val**3) * r_prime
 
 def integrand_Bphi_scipy_solid(phi_prime, r_prime, z_prime, r_obs, phi_obs, z_obs):
     g_val = g_func(r_obs, phi_obs, z_obs, r_prime, phi_prime, z_prime)
-    return np.cos(phi_prime) * np.sin(phi_obs - phi_prime) * (g_val**3) * r_prime
+    return np.cos(phi_prime) * np.sin(phi_obs - phi_prime) * (g_val**3) * r_prime**2
 
 def integrand_Bz_scipy_solid(phi_prime, r_prime, z_prime, r_obs, phi_obs, z_obs):
     g_val = g_func(r_obs, phi_obs, z_obs, r_prime, phi_prime, z_prime)
     return np.cos(phi_prime) * (z_obs - z_prime) * (g_val**3) * r_prime
 
-# --- Function to Calculate ALL B Components at a Single Observation Point (Same as above) ---
+# --- Function to Calculate ALL B Components at a Single Observation Point ---
 def calculate_B_field_scipy_solid(r_obs, phi_obs, z_obs):
     phi_prime_lower_limit = lambda r_prime_dummy, z_prime_dummy: 0.0
     phi_prime_upper_limit = lambda r_prime_dummy, z_prime_dummy: 2 * np.pi
@@ -43,9 +58,15 @@ def calculate_B_field_scipy_solid(r_obs, phi_obs, z_obs):
     z_prime_upper_limit = z_magnet_end
     args_tuple = (r_obs, phi_obs, z_obs)
 
-    integral_Br, _ = tplquad(integrand_Br_scipy_solid, z_prime_lower_limit, z_prime_upper_limit, r_prime_lower_limit, r_prime_upper_limit, phi_prime_lower_limit, phi_prime_upper_limit, args=args_tuple)
-    integral_Bphi, _ = tplquad(integrand_Bphi_scipy_solid, z_prime_lower_limit, z_prime_upper_limit, r_prime_lower_limit, r_prime_upper_limit, phi_prime_lower_limit, phi_prime_upper_limit, args=args_tuple)
-    integral_Bz, _ = tplquad(integrand_Bz_scipy_solid, z_prime_lower_limit, z_prime_upper_limit, r_prime_lower_limit, r_prime_upper_limit, phi_prime_lower_limit, phi_prime_upper_limit, args=args_tuple)
+    integral_Br, _ = tplquad(integrand_Br_scipy_solid, z_prime_lower_limit, 
+                             z_prime_upper_limit, r_prime_lower_limit, r_prime_upper_limit,
+                             phi_prime_lower_limit, phi_prime_upper_limit, args=args_tuple)
+    integral_Bphi, _ = tplquad(integrand_Bphi_scipy_solid, z_prime_lower_limit,
+                               z_prime_upper_limit, r_prime_lower_limit,r_prime_upper_limit,
+                               phi_prime_lower_limit, phi_prime_upper_limit, args=args_tuple)
+    integral_Bz, _ = tplquad(integrand_Bz_scipy_solid, z_prime_lower_limit, 
+                             z_prime_upper_limit, r_prime_lower_limit, r_prime_upper_limit, 
+                             phi_prime_lower_limit, phi_prime_upper_limit, args=args_tuple)
 
     Br = common_prefactor * integral_Br
     Bphi = common_prefactor * integral_Bphi
@@ -67,7 +88,7 @@ def calculate_thd(signal, sampling_rate_rad=None):
     sampling_rate_rad: Number of samples per 2*pi radians. If None, assumes 2*pi period.
     """
     N = len(signal)
-    if N < 2: return np.nan # Not enough points for FFT
+    if N < 2: return np.nan                                      # Not enough points for FFT
 
     # Perform FFT
     yf = fft(signal)
@@ -76,7 +97,7 @@ def calculate_thd(signal, sampling_rate_rad=None):
     # Calculate magnitude spectrum (one-sided)
     # Only take first half for positive frequencies, ignoring DC component (index 0)
     magnitudes = 2.0/N * np.abs(yf[1:N//2])
-    frequencies = np.abs(xf[1:N//2]) # Absolute value for frequencies
+    frequencies = np.abs(xf[1:N//2])                            # Absolute value for frequencies
 
     if len(magnitudes) == 0: return np.nan
 
@@ -87,7 +108,7 @@ def calculate_thd(signal, sampling_rate_rad=None):
     # Calculate power of harmonics (all other components)
     harmonic_power_sum = np.sum(magnitudes**2) - fundamental_power
 
-    if fundamental_power == 0: return np.nan # Avoid division by zero
+    if fundamental_power == 0: return np.nan                    # Avoid division by zero
     
     thd = np.sqrt(harmonic_power_sum / fundamental_power)
     return thd
@@ -119,7 +140,7 @@ def calculate_snr(signal, noise_level_tesla=0.0):
         # Power of the added noise
         added_noise_power = np.mean(noise**2)
         
-        if added_noise_power == 0: return np.nan # Avoid division by zero
+        if added_noise_power == 0: return np.nan                # Avoid division by zero
         snr_linear = true_signal_power / added_noise_power
         snr_db = 10 * np.log10(snr_linear)
         return snr_db
@@ -127,16 +148,17 @@ def calculate_snr(signal, noise_level_tesla=0.0):
         # Without explicit noise, it's hard to define SNR for a simulated signal.
         # This could be interpreted as comparing fundamental power to harmonic power,
         # but that's essentially THD.
-        return np.nan # Not well-defined without a noise model
+        return np.nan                                           # Not well-defined without a noise model
+
 
 # ====================================================================
 # Main Execution for Waveform Plot and Analysis
 # ====================================================================
 
 # --- Define Varying Parameters for a "Waveform" Plot (Varying PHI) ---
-fixed_r_obs = 2.0e-2   # Fixed radial distance (e.g., 20 mm)
-fixed_z_obs = 0.0e-3   # Fixed axial distance (e.g., at magnet center, 0 mm)
-phi_observation_points = np.linspace(0, 2 * np.pi, 100) # More points for smoother sine wave and better FFT
+fixed_r_obs = 2.0e-2                                            # Fixed radial distance (Assumption 20 mm) can be varying
+fixed_z_obs = 0.0e-3                                            # Fixed axial distance (e.g., at magnet center, 0 mm)
+phi_observation_points = np.linspace(0, 2 * np.pi, 20)         # More points for smoother sine wave and better FFT
 
 # --- Calculate B_r, B_phi, B_z for Each Point ---
 Br_values = np.zeros_like(phi_observation_points)
@@ -171,8 +193,8 @@ thd_bphi = calculate_thd(Bphi_values)
 print(f"  Total Harmonic Distortion (THD) of B_phi: {thd_bphi:.4f} (ratio, lower is better)")
 
 # To demonstrate SNR, let's add some artificial noise to B_phi
-noise_standard_deviation = 1e-6 # Example noise level in Tesla (1 microTesla)
-np.random.seed(0) # For reproducibility
+noise_standard_deviation = 1e-6                                 # Example noise level in Tesla (1 microTesla)
+np.random.seed(0)                                               # For reproducibility
 Bphi_noisy = Bphi_values + np.random.normal(0, noise_standard_deviation, len(Bphi_values))
 
 snr_bphi = calculate_snr(Bphi_values, noise_standard_deviation) # Pass the original clean signal and noise level
