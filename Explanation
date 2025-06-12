@@ -1,0 +1,288 @@
+def calculate_thd(signal):
+    N = len(signal)
+    if N < 2: return np.nan                                     # Not enough points for FFT
+
+    # 1. Perform FFT (Fast Fourier Transform)
+    yf = fft(signal)                                            # yf is the complex-valued FFT output
+    
+    # 2. Calculate Magnitude Spectrum
+    # N//2 gives you half the length (for positive frequencies)
+    # We take absolute value to get magnitude, and multiply by 2.0/N to normalize
+    # and get the one-sided spectrum. We start from index 1 to exclude the DC component (average value).
+    magnitudes = 2.0/N * np.abs(yf[1:N//2]) 
+    
+    if len(magnitudes) == 0: return np.nan                      # No frequencies to analyze
+
+    # 3. Identify the Fundamental Frequency
+    # This assumes the fundamental is the strongest component after DC.
+    # For your phi sweep (0 to 2*pi), the "fundamental" corresponds to the once-per-revolution component.
+    fundamental_idx = np.argmax(magnitudes) # Index of the largest magnitude
+    fundamental_power = magnitudes[fundamental_idx]**2 # Power is magnitude squared
+
+    # 4. Calculate Power of Harmonics
+    # The sum of squares of all magnitudes is the total power (excluding DC).
+    # Subtracting the fundamental power gives the power of all other components (harmonics).
+    harmonic_power_sum = np.sum(magnitudes**2) - fundamental_power
+
+    if fundamental_power == 0: return np.nan # Avoid division by zero if no fundamental signal
+    
+    # 5. Compute THD using the formula
+    # THD = sqrt( (Power of Harmonics) / (Power of Fundamental) )
+    thd = np.sqrt(harmonic_power_sum / fundamental_power)
+    return thd
+
+#############################################################################################################
+
+def calculate_snr(signal, noise_level_tesla=0.0):
+    """
+    Calculates Signal-to-Noise Ratio (SNR).
+    Assumes added noise, otherwise, you need a method to separate signal from noise.
+    """
+    # Power of the original signal (before adding external noise)
+    true_signal_power = np.mean(signal**2) # This is the mean squared value, representing power
+
+    # If noise_level_tesla is provided (>0), we add synthetic noise for demonstration.
+    # This simulates a real-world sensor reading that might have random fluctuations.
+    if noise_level_tesla > 0:
+        noise = np.random.normal(0, noise_level_tesla, len(signal)) # Generate Gaussian (normal) random noise
+        added_noise_power = np.mean(noise**2) # Power of the added noise
+        
+        if added_noise_power == 0: return np.nan # Avoid division by zero
+        
+        # SNR in linear scale: P_signal / P_noise
+        snr_linear = true_signal_power / added_noise_power
+        
+        # SNR in decibels (dB): 10 * log10(P_signal / P_noise)
+        snr_db = 10 * np.log10(snr_linear)
+        return snr_db
+    else:
+        # If no noise_level_tesla is provided, we can't calculate a meaningful SNR
+        # because the simulated signal itself is considered "pure" or "noise-free".
+        # You could also define noise as the harmonic components (similar to THD),
+        # but that's a different interpretation of "noise" vs. "distortion".
+        return np.nan # Not well-defined without a noise model or actual noise
+
+##################################################################################################################
+
+# ====================================================================
+# Main Execution for Waveform Plot and Analysis
+# ====================================================================
+
+# --- Define Varying Parameters for a "Waveform" Plot (Varying PHI) ---
+# This block sets up the observation points for which we will calculate the magnetic field.
+# Instead of sweeping across 'r' or 'z' as in previous examples, we are now
+# sweeping across the azimuthal angle 'phi' to generate a periodic "waveform."
+
+fixed_r_obs = 2.0e-2   # Fixed radial distance (e.g., 20 mm from the center axis)
+# For the B-field calculation to be meaningful and to avoid the extreme slowness
+# at r=0, we choose a fixed radial distance for our observation points.
+# This simulates a sensor that is located at a constant distance from the central axis
+# of the magnet. (2.0e-2 meters = 20 mm)
+
+fixed_z_obs = 0.0e-3   # Fixed axial distance (e.g., at magnet center, 0 mm)
+# Similarly, we fix the height (z-coordinate) of our observation points.
+# 0.0e-3 meters means the observation plane is exactly at the magnet's mid-height.
+# This simulates a sensor that is at a constant height relative to the magnet.
+
+phi_observation_points = np.linspace(0, 2 * np.pi, 50) 
+# This is the array of azimuthal angles (phi) for which we will calculate the B-field.
+# - `np.linspace(start, stop, num)`: Creates an array of `num` equally spaced points
+#   between `start` and `stop`.
+# - `0`: The starting angle (0 radians, which is 0 degrees).
+# - `2 * np.pi`: The ending angle (2*pi radians, which is 360 degrees). This completes
+#   a full circle, which is essential for analyzing periodic signals like sine waves.
+# - `50`: The number of points (samples) we will calculate. More points will give a
+#   smoother curve and better FFT results, but will also take longer to calculate.
+#   For initial testing, 50 is a reasonable balance.
+
+# --- Calculate B_r, B_phi, B_z for Each Point ---
+# This is the core computational loop where the magnetic field is calculated for each
+# of the defined observation points.
+
+Br_values = np.zeros_like(phi_observation_points)
+Bphi_values = np.zeros_like(phi_observation_points)
+Bz_values = np.zeros_like(phi_observation_points)
+# These lines initialize three NumPy arrays.
+# `np.zeros_like(array)` creates a new array of zeros with the same shape and data type
+# as the input `array` (`phi_observation_points` in this case).
+# This pre-allocates memory for storing the calculated B_r, B_phi, and B_z values
+# corresponding to each `phi_observation_point`. This is generally good practice for
+# performance in Python.
+
+print(f"\n--- Calculating B-field components for {len(phi_observation_points)} azimuthal points ---")
+print(f"Observation Point: r = {fixed_r_obs*1000:.1f} mm, z = {fixed_z_obs*1000:.1f} mm")
+print("\nPhi (deg) | B_r (mT)   | B_phi (mT) | B_z (mT)")
+print("--------------------------------------------------")
+# These print statements provide informative headers to the console output.
+# They indicate what calculations are about to start and set up a clear table format
+# for the data that will be printed next.
+# `fixed_r_obs*1000` converts meters to millimeters for readability.
+# `:.1f` and `:.4f` are f-string formatting for floating-point numbers,
+# specifying the number of decimal places.
+# `<10.2f` means left-aligned in a field of 10 characters with 2 decimal places.
+
+start_time_phi_calc = time.time()
+# Records the current time before starting the main calculation loop.
+# This will be used later to calculate how long the loop took to execute.
+
+for i, phi_val in enumerate(phi_observation_points):
+    # This `for` loop iterates through each angle in the `phi_observation_points` array.
+    # `enumerate` provides both the index (`i`) and the value (`phi_val`) for each iteration.
+    
+    br, bphi, bz = calculate_B_field_scipy_solid(fixed_r_obs, phi_val, fixed_z_obs)
+    # This is the most computationally intensive part. For each (r, phi, z) observation point:
+    # - `fixed_r_obs`: The constant radial distance.
+    # - `phi_val`: The current azimuthal angle from the `phi_observation_points` array.
+    # - `fixed_z_obs`: The constant axial distance.
+    # The `calculate_B_field_scipy_solid` function (which contains the triple integrals)
+    # is called. It returns the calculated B_r, B_phi, and B_z components at that specific point.
+    
+    Br_values[i] = br
+    Bphi_values[i] = bphi
+    Bz_values[i] = bz
+    # The returned `br`, `bphi`, and `bz` values are stored into their respective arrays
+    # at the current index `i`.
+    
+    # Print the data point
+    print(f"{np.degrees(phi_val):<10.2f}| {br*1000:<11.4f}| {bphi*1000:<11.4f}| {bz*1000:<11.4f}")
+    # This line prints the calculated data point to the console.
+    # - `np.degrees(phi_val)`: Converts the current angle from radians to degrees for easier reading.
+    # - `br*1000`, `bphi*1000`, `bz*1000`: Converts Tesla values to milliTesla (mT) for practical units.
+    # - The f-string formatting ensures that the numbers are aligned in columns, making the
+    #   output a readable table. This directly addresses your request to "print all the data before
+    #   being plotted."
+
+end_time_phi_calc = time.time()
+# Records the current time after the loop finishes.
+print("--------------------------------------------------")
+print(f"\nAzimuthal sweep calculation complete in {end_time_phi_calc - start_time_phi_calc:.2f} seconds.")
+# Prints a footer for the table and shows the total time taken for all the calculations
+# in this loop. This gives you an idea of the computational cost for this specific sweep.
+
+# --- Perform Signal Analysis ---
+# This section takes the calculated B-field values (now treated as "signals") and
+# applies the signal processing functions (`calculate_amplitude`, `calculate_thd`, `calculate_snr`)
+# that were defined earlier.
+
+print("\n--- Signal Analysis ---")
+# Header for the analysis output.
+
+print("\nAnalyzing B_phi signal:")
+amplitude_bphi = calculate_amplitude(Bphi_values)
+print(f"  Peak-to-Peak Amplitude (B_phi): {amplitude_bphi:.4e} T ({amplitude_bphi*1000:.2f} mT)")
+# Calls `calculate_amplitude` for the `Bphi_values` array and prints its peak-to-peak amplitude.
+# It's converted to both Tesla (scientific notation) and milliTesla for clarity.
+
+thd_bphi = calculate_thd(Bphi_values)
+print(f"  Total Harmonic Distortion (THD) of B_phi: {thd_bphi:.4f} (ratio, lower is better)")
+# Calls `calculate_thd` for `Bphi_values` and prints the calculated THD.
+# A lower ratio indicates a signal closer to a pure sine wave.
+
+# To demonstrate SNR, let's add some artificial noise to B_phi
+noise_standard_deviation = 1e-6 # Example noise level in Tesla (1 microTesla)
+# Defines the standard deviation for the simulated random noise. This value determines
+# how "strong" the added noise will be. 1e-6 T is 1 microTesla.
+
+np.random.seed(0) # For reproducibility
+# Sets the "seed" for the random number generator. If you run the code multiple times
+# with the same seed, the `np.random.normal` function will produce the exact same
+# sequence of "random" numbers. This is crucial for debugging and ensuring your
+# results are consistent between runs.
+
+Bphi_noisy = Bphi_values + np.random.normal(0, noise_standard_deviation, len(Bphi_values))
+# Creates a "noisy" version of the B_phi signal.
+# - `np.random.normal(mean, std_dev, size)`: Generates random numbers from a
+#   normal (Gaussian) distribution.
+#   - `0`: The mean of the noise (centered around zero).
+#   - `noise_standard_deviation`: The standard deviation of the noise, controlling its spread.
+#   - `len(Bphi_values)`: Ensures the noise array has the same number of points as the signal.
+# This simulated noise is then simply added to the `Bphi_values` to create `Bphi_noisy`.
+
+snr_bphi = calculate_snr(Bphi_values, noise_standard_deviation)
+print(f"  Signal-to-Noise Ratio (SNR) of B_phi (with added noise): {snr_bphi:.2f} dB (higher is better)")
+# Calls `calculate_snr`. Note that it takes the *original, clean* `Bphi_values`
+# as the signal and the `noise_standard_deviation` to calculate the SNR.
+# The SNR is printed in decibels (dB), where a higher value indicates a better quality signal
+# relative to the noise.
+
+# Similar analysis is performed for Br and Bz values
+print("\nAnalyzing B_r signal:")
+amplitude_br = calculate_amplitude(Br_values)
+print(f"  Peak-to-Peak Amplitude (B_r): {amplitude_br:.4e} T ({amplitude_br*1000:.2f} mT)")
+thd_br = calculate_thd(Br_values)
+print(f"  Total Harmonic Distortion (THD) of B_r: {thd_br:.4f}")
+
+print("\nAnalyzing B_z signal:")
+amplitude_bz = calculate_amplitude(Bz_values)
+print(f"  Peak-to-Peak Amplitude (B_z): {amplitude_bz:.4e} T ({amplitude_bz*1000:.2f} mT)")
+thd_bz = calculate_thd(Bz_values)
+print(f"  Total Harmonic Distortion (THD) of B_z: {thd_bz:.4f}")
+# These blocks are identical in structure to the B_phi analysis, just applied to
+# the B_r and B_z components. For a diametrically magnetized disc, you would
+# expect these components to also show some periodic variation with phi, so this
+# analysis is relevant for them too.
+
+# --- Plotting the "Waveform" with optional noise ---
+# This final section uses Matplotlib to create the visual representation of the data.
+
+plt.figure(figsize=(12, 8))
+# Creates a new figure (the window where the plot will appear) with a specified size
+# (12 inches wide, 8 inches tall).
+
+plt.subplot(2,1,1) 
+# This command sets up a grid for multiple plots within the same figure.
+# - `2`: Number of rows in the grid.
+# - `1`: Number of columns in the grid.
+# - `1`: The index of the current subplot (this is the first plot, in the top position).
+
+plt.plot(np.degrees(phi_observation_points), Br_values * 1000, label='B_r (mT)', alpha=0.8)
+plt.plot(np.degrees(phi_observation_points), Bphi_values * 1000, label='B_phi (mT)', alpha=0.8)
+plt.plot(np.degrees(phi_observation_points), Bz_values * 1000, label='B_z (mT)', alpha=0.8)
+# These are the actual plotting commands.
+# - `np.degrees(phi_observation_points)`: The x-axis data (angles in degrees).
+# - `Br_values * 1000`, etc.: The y-axis data (B-field components converted to milliTesla).
+# - `label`: Text that will appear in the plot's legend for each line.
+# - `alpha=0.8`: Makes the lines slightly transparent (80% opaque), which can be useful
+#   if lines overlap.
+
+plt.title(f'Magnetic Field Components vs. Azimuthal Angle (phi)\n'
+          f'at r={fixed_r_obs*1000:.1f} mm, z={fixed_z_obs*1000:.1f} mm')
+plt.xlabel('Azimuthal Angle, phi (degrees)')
+plt.ylabel('Magnetic Field (mT)')
+plt.grid(True, linestyle='--', alpha=0.6)
+plt.legend()
+# These are standard Matplotlib commands to add titles, axis labels, a grid, and a legend
+# to the current subplot, making the plot informative and readable.
+
+plt.subplot(2,1,2) 
+# Switches to the second subplot (bottom position in the 2x1 grid).
+
+plt.plot(np.degrees(phi_observation_points), Bphi_values * 1000, 'b--', label='B_phi (Clean, mT)', alpha=0.6)
+plt.plot(np.degrees(phi_observation_points), Bphi_noisy * 1000, 'r-', label='B_phi (Noisy, mT)', alpha=0.8)
+# This subplot specifically compares the clean B_phi signal with the artificially
+# noisy version (`Bphi_noisy`).
+# - `'b--'`: Blue dashed line for the clean signal.
+# - `'r-'`: Red solid line for the noisy signal.
+# This visual comparison helps you see the effect of the added noise and understand SNR.
+
+plt.title(f'B_phi with Added Noise (Std Dev: {noise_standard_deviation*1e6:.1f} uT)')
+plt.xlabel('Azimuthal Angle, phi (degrees)')
+plt.ylabel('Magnetic Field (mT)')
+plt.grid(True, linestyle='--', alpha=0.6)
+plt.legend()
+# Standard labels and legend for the second subplot.
+# The title includes the noise standard deviation, converted to microTesla (uT).
+
+plt.tight_layout()
+# Adjusts the subplot parameters for a tight layout, preventing labels or titles from
+# overlapping and making the overall figure look neat.
+
+plt.show()
+# This command displays the generated Matplotlib figure with both subplots.
+# The program execution pauses here until you close the plot window.
+
+---
+
+This section orchestrates the entire process from defining the observation points to performing calculations, printing raw data, analyzing signals, and finally visualizing the results. It allows you to explore the azimuthal dependence of the magnetic field and apply signal processing metrics to the resulting "waveforms."
+
+
