@@ -1,0 +1,186 @@
+# ====================================================================
+# Main Execution for Waveform Plot and Analysis (Modified for Volume Exploration)
+# ====================================================================
+
+# --- Define Varying Parameters for a "Volume" Plot (Varying R and PHI) ---
+# This section defines the specific points in space where the magnetic field will be calculated.
+# To explore the "volume," we are now varying two parameters: radial distance (R) and azimuthal angle (PHI).
+
+fixed_z_obs = 0.0e-3 # Fixed axial distance (at magnet center, 0 mm)
+# This sets the Z-coordinate (height) of all observation points to be constant at the magnet's mid-plane.
+# So, all calculations are happening in a single 2D plane (the XY-plane, if Z is vertical).
+
+# Define multiple radial observation distances to explore the volume
+# Start just outside the magnet's radius and go outwards.
+# Choose 3-5 distances for a good visual comparison.
+r_observation_radii = np.linspace(R_magnet_outer, 0.05, 10)
+# This creates an array of 10 equally spaced radial distances (r_obs) for our observation points.
+# - `np.linspace(start, stop, num)`: Generates `num` points between `start` and `stop`.
+# - `R_magnet_outer`: The first radial distance is exactly the outer radius of the magnet.
+#   (Note: Calculating exactly *on* the magnet's surface or inside can be numerically challenging due to singularities.
+#   If you encounter errors or extreme slowness, you might want to start slightly *outside* R_magnet_outer,
+#   e.g., `R_magnet_outer * 1.01`).
+# - `0.05`: The largest radial distance (50 mm from the center).
+# - `10`: The number of different radial distances we will evaluate. Each of these will generate its own "waveform."
+
+# For each r_obs, we will still sweep phi
+phi_observation_points = np.linspace(0, 10 * np.pi, 50) # 50 points for one full revolution
+# This defines the set of azimuthal angles (phi_obs) that will be swept for *each* of the `r_observation_radii`.
+# - `0`: Starting angle (0 radians / 0 degrees).
+# - `10 * np.pi`: Ending angle (5 full rotations). This means each waveform will show 5 cycles of the field.
+# - `50`: The number of points sampled *across the entire 5 rotations*. This implies 10 points per 2*pi rotation (`50 points / 5 rotations = 10 points/rotation`).
+#   While showing 5 cycles, 10 points per cycle is a relatively low sampling density for a smooth curve. If your plots look "jagged," increasing this number (e.g., to 250 or 500) would make them smoother but increase calculation time.
+
+# --- Data Storage ---
+# Store Br, Bphi, and Bz values for each r_obs and corresponding phi_obs sweep
+all_Br_data = {}
+all_Bphi_data = {}
+all_Bz_data = {} # Keep Bz data as well for completeness if needed later
+# These are dictionaries used to store the results.
+# - The `keys` of these dictionaries will be the `r_obs_val` (the specific radial distance).
+# - The `values` associated with each key will be a NumPy array containing all the `Br`, `Bphi`, or `Bz` values
+#   calculated for the `phi_observation_points` at that particular `r_obs_val`.
+# This structure allows you to easily retrieve and plot the "waveform" for each radial distance.
+
+print(f"\n--- Calculating B-field components for multiple radial distances at z = {fixed_z_obs*1000:.1f} mm ---")
+# An informative print statement indicating the start of the calculations and the fixed Z-plane.
+
+total_start_time = time.time()
+# Records the starting time of the entire calculation process (all r-sweeps).
+
+for r_obs_val in r_observation_radii:
+    # This is the OUTER loop. It iterates through each specified radial distance.
+    # For each `r_obs_val`, we will perform a full azimuthal sweep.
+    
+    print(f"\n--- Calculating for r = {r_obs_val*1000:.1f} mm ---")
+    # Prints the current radial distance being processed.
+    
+    # Initialize arrays for the current r_obs_val
+    Br_values_current_r = np.zeros_like(phi_observation_points)
+    Bphi_values_current_r = np.zeros_like(phi_observation_points)
+    Bz_values_current_r = np.zeros_like(phi_observation_points)
+    # For each new `r_obs_val`, fresh (empty) arrays are created to store the B-field components
+    # calculated during the upcoming `phi` sweep. `np.zeros_like()` ensures they have the correct size.
+
+    start_time_phi_calc = time.time()
+    # Records the starting time for the current *phi sweep* at this specific `r_obs_val`.
+    
+    for i, phi_val in enumerate(phi_observation_points):
+        # This is the INNER loop. It iterates through each azimuthal angle (`phi_val`)
+        # for the currently selected `r_obs_val` and `fixed_z_obs`.
+        
+        br, bphi, bz = calculate_B_field_scipy_solid(r_obs_val, phi_val, fixed_z_obs)
+        # This is the heart of the calculation. The `calculate_B_field_scipy_solid` function
+        # (which contains the triple integrals) is called for the current observation point (r_obs_val, phi_val, fixed_z_obs).
+        # It returns the radial (br), azimuthal (bphi), and axial (bz) magnetic field components.
+        
+        Br_values_current_r[i] = br
+        Bphi_values_current_r[i] = bphi
+        Bz_values_current_r[i] = bz
+        # The calculated `br`, `bphi`, and `bz` values are stored in their respective arrays
+        # at the current index `i`, corresponding to the `phi_val`.
+        
+        # Optionally, print each point. This can be very verbose for many r values and phi points.
+        # print(f" Phi (deg): {np.degrees(phi_val):<7.2f} | Br: {br*1000:<8.4f} mT | Bphi: {bphi*1000:<8.4f} mT | Bz: {bz*1000:.4f} mT")
+        # This line, if uncommented, would print a detailed table of `phi` (in degrees), `Br`, `Bphi`, and `Bz` (in milliTesla)
+        # for *each individual calculated point*. Given 10 radial distances and 50 phi points each, this would result in 500 lines of output.
+        # It's usually commented out after initial debugging due to verbosity.
+
+    end_time_phi_calc = time.time()
+    print(f"--- Calculation for r = {r_obs_val*1000:.1f} mm complete in {end_time_phi_calc - start_time_phi_calc:.2f} seconds.")
+    # Prints the time taken for the current `phi` sweep at the specific `r_obs_val`.
+    
+    # Store the results for the current r_obs_val
+    all_Br_data[r_obs_val] = Br_values_current_r
+    all_Bphi_data[r_obs_val] = Bphi_values_current_r
+    all_Bz_data[r_obs_val] = Bz_values_current_r
+    # After a full `phi` sweep for a given `r_obs_val` is complete, the arrays containing all the
+    # `Br`, `Bphi`, and `Bz` values for that sweep are stored into their respective dictionaries.
+
+total_end_time = time.time()
+print(f"\nAll volume calculations complete in {total_end_time - total_start_time:.2f} seconds.")
+# Prints the total time taken for all radial sweeps combined.
+
+# --- Plotting Br and Bphi for all varying phi angles at different r_obs ---
+# This section uses Matplotlib to visualize the calculated data.
+
+plt.figure(figsize=(14, 10)) # Larger figure to accommodate two plots
+# Creates a new Matplotlib figure (the window that will display the plots). The `figsize` makes it wider and taller.
+
+# Plot for B_phi
+plt.subplot(2, 1, 1) # 2 rows, 1 column, 1st plot
+# Sets up a grid of subplots. This command selects the first subplot (top position) in a 2-row, 1-column grid.
+for r_obs_val, bphi_values in all_Bphi_data.items():
+    # This loop iterates through the `all_Bphi_data` dictionary.
+    # For each radial distance (`r_obs_val`) in the dictionary, it retrieves the corresponding `bphi_values` array.
+    plt.plot(np.degrees(phi_observation_points), bphi_values * 1000, 
+             label=f'r = {r_obs_val*1000:.1f} mm')
+    # This plots a single line on the subplot:
+    # - X-axis: `phi_observation_points` converted to degrees.
+    # - Y-axis: `bphi_values` (for the current `r_obs_val`) converted to milliTesla.
+    # - `label`: A label is created for the legend, indicating the radial distance (e.g., "r = 25.4 mm").
+# This loop is why you see multiple sine-wave-like lines in your "Bphi with varying r and phi.jpg" plot,
+# each corresponding to a different `r_obs_val`.
+
+plt.title(f'B_phi vs. Azimuthal Angle at different Radial Distances (z={fixed_z_obs*1000:.1f} mm)')
+plt.xlabel('Azimuthal Angle, phi (degrees)')
+plt.ylabel('B_phi (mT)')
+plt.grid(True, linestyle='--', alpha=0.6)
+plt.legend(title='Observation Radius')
+# These lines add the title, axis labels, a grid, and a legend to the B_phi subplot,
+# making it informative and readable. The legend uses the `label` defined in the `plt.plot` calls.
+
+# Plot for B_r
+plt.subplot(2, 1, 2) # 2 rows, 1 column, 2nd plot
+# Selects the second subplot (bottom position).
+for r_obs_val, br_values in all_Br_data.items():
+    # Similar loop, but this time for the `Br` data.
+    plt.plot(np.degrees(phi_observation_points), br_values * 1000, 
+             label=f'r = {r_obs_val*1000:.1f} mm')
+    # Plots the `Br` waveforms for each radial distance.
+
+plt.title(f'B_r vs. Azimuthal Angle at different Radial Distances (z={fixed_z_obs*1000:.1f} mm)')
+plt.xlabel('Azimuthal Angle, phi (degrees)')
+plt.ylabel('B_r (mT)')
+plt.grid(True, linestyle='--', alpha=0.6)
+plt.legend(title='Observation Radius')
+# Adds title, labels, grid, and legend for the B_r subplot.
+
+plt.tight_layout() # Adjusts subplot params for a tight layout
+# Automatically adjusts subplot parameters for a tight layout, ensuring that titles, labels,
+# and legends don't overlap.
+plt.show()
+# Displays the figure containing both the B_phi and B_r plots. The program pauses here until you close the window.
+
+# --- Optional: Signal Analysis for selected r_obs (e.g., the closest one) ---
+# This block demonstrates how you can apply the signal analysis functions (amplitude, THD, SNR)
+# to one of the generated waveforms. It's marked as optional because running it for all 10 waveforms
+# would produce a lot of text output.
+
+print("\n--- Signal Analysis for closest r_obs ---")
+closest_r_obs = r_observation_radii[0]
+print(f"Analyzing signal at r = {closest_r_obs*1000:.1f} mm:")
+# Selects the first (closest) radial distance for analysis.
+
+bphi_closest = all_Bphi_data[closest_r_obs]
+br_closest = all_Br_data[closest_r_obs]
+# Retrieves the B_phi and B_r waveforms for the selected closest radial distance.
+
+print("\n  B_phi:")
+amplitude_bphi_closest = calculate_amplitude(bphi_closest)
+print(f"    Peak-to-Peak Amplitude: {amplitude_bphi_closest*1000:.2f} mT")
+thd_bphi_closest = calculate_thd(bphi_closest)
+print(f"    THD: {thd_bphi_closest:.4f}")
+# SNR calculation for B_phi (with artificial noise)
+noise_standard_deviation = 1e-6 
+np.random.seed(0) 
+snr_bphi_closest = calculate_snr(bphi_closest, noise_standard_deviation)
+print(f"    SNR (with {noise_standard_deviation*1e6:.1f} uT noise): {snr_bphi_closest:.2f} dB")
+# Calls the signal analysis functions for the B_phi waveform and prints the results.
+
+print("\n  B_r:")
+amplitude_br_closest = calculate_amplitude(br_closest)
+print(f"    Peak-to-Peak Amplitude: {amplitude_br_closest*1000:.2f} mT")
+thd_br_closest = calculate_thd(br_closest)
+print(f"    THD: {thd_br_closest:.4f}")
+# Calls the signal analysis functions for the B_r waveform and prints the results.
