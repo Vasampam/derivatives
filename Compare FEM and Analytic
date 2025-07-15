@@ -1,0 +1,149 @@
+###############################################################################################
+# Performing FFT of Bphi
+n = len(Bphi)                                                       # Length of Bphi samples
+Bphi_FFT = np.fft.fft(Bphi)                                         # Transformed Bphi
+
+Bphi_FFT = np.abs(Bphi_FFT)/n*2                                     # Absolute Bphi
+Bphi_FFT = 100*Bphi_FFT/Bphi_FFT[1]                   
+plt.stem(Bphi_FFT)                                                  # Stem plot of FFT Bphi 
+plt.grid(linestyle='-', linewidth=1)
+plt.yscale('log')                                                   # Logarithmic scale for y
+plt.xlim(0,100)                                                     # Range of X axis 
+plt.ylim(1e-6,100)
+
+import pandas as pd
+dataframe1 = pd.read_excel('C:\\Users\\VASAMPAM\\Calculator_Expressions_Plot_1_for_Bphi.xlsx')
+dataframe1
+
+# Comparing the plot of B_phi analytical & B_phi FEM 
+Bphi_FEM = dataframe1.B_phi_2
+plt.plot(np.linspace(0,360,len(Bphi_FEM)),Bphi_FEM,'r')
+plt.plot(np.linspace(0,360,len(Bphi)),Bphi,'--b')
+plt.grid(linestyle='-', linewidth=1)
+plt.title('Comparision of Analytic and FEM')
+plt.xlabel('Azimthal Angle')
+plt.ylabel('B Magnetic Field')
+plt.legend(['Bphi_FEM','Bphi'])
+plt.show()
+
+print(f"Max amplitude Bphi_FEM :{max(abs(Bphi_FEM)):.6}T")
+print(f"Max amplitude Bphi :{np.max(abs(Bphi)):.6}T")
+
+# Transforming the Signal 
+Bphi_FEM_FFT = np.fft.fft(Bphi_FEM)
+n = len(Bphi_FEM_FFT)
+Bphi_FEM_FFT = np.abs(Bphi_FEM_FFT)/n*2
+Bphi_FEM_FFT = 100*Bphi_FEM_FFT/Bphi_FEM_FFT[1]
+plt.stem(Bphi_FFT,'b')
+plt.stem(Bphi_FEM_FFT,'r')
+
+plt.grid(linestyle = '-', linewidth=1)
+plt.yscale('log')
+plt.xlim(0,100)
+plt.ylim(1e-6,100)
+
+
+print(f"Max amplitude of transformed Bphi_FEM :{np.sqrt(np.sum(Bphi_FEM[3:50]**2)):.6}T")
+print(f"Max amplitude of transformed Bphi :{np.sqrt(np.sum(Bphi[3:50]**2)):.6}T")
+
+#####################################################################################################
+# Performing FFT of Br
+m = len(Br)                                                       # Length of Brsamples
+Br_FFT = np.fft.fft(Br)                                           # Transformed Br
+
+Br_FFT = np.abs(Br_FFT)/n*2                                       # Absolute Br
+Br_FFT = 100*Br_FFT/Br_FFT[1]                   
+plt.stem(Br_FFT)                                                  # Stem plot of FFT Br
+plt.grid(linestyle='-', linewidth=1)
+plt.yscale('log')                                                 # Logarithmic scale for y
+plt.xlim(0,100)                                                   # Range of X axis 
+plt.ylim(1e-6,100)
+
+import pandas as pd
+dataframe2 = pd.read_excel('C:\\Users\\VASAMPAM\\Calculator_Expressions_Plot_2_for_Br.xlsx')
+dataframe2
+
+# Comparing the plot of Br analytical & Br_FEM 
+Br_FEM = dataframe2.B_r_2
+plt.plot(np.linspace(0,360,len(Br_FEM)),Br_FEM,'r')
+plt.plot(np.linspace(0,360,len(Br)),Br,'--b')
+plt.grid(linestyle='-', linewidth=1)
+plt.title('Comparision of Analytic and FEM')
+plt.xlabel('Azimthal Angle')
+plt.ylabel('B Magnetic Field')
+plt.legend(['Br_FEM','Br'])
+plt.show()                                                #################################################################
+                                                          ###### Graph is reversed & FFT plot doesnt match ################ 
+print(f"Max amplitude Br_FEM :{max(abs(Br_FEM)):.6}T")
+print(f"Max amplitude Br :{np.max(abs(Br)):.6}T")
+
+# Transforming the Signal 
+Br_FEM_FFT = np.fft.fft(Br_FEM)
+m = len(Br_FEM_FFT)
+Br_FEM_FFT = np.abs(Br_FEM_FFT)/n*2
+Br_FEM_FFT = 100*Br_FEM_FFT/Br_FEM_FFT[1]
+plt.stem(Br_FFT,'b')
+plt.stem(Br_FEM_FFT,'r')
+
+plt.grid(linestyle = '-', linewidth=1)
+plt.yscale('log')
+plt.xlim(0,100)
+plt.ylim(1e-6,100)
+
+
+print(f"Max amplitude of transformed Br_FEM :{np.sqrt(np.sum(Br_FEM[3:50]**2)):.6}T")
+print(f"Max amplitude of transformed Br :{np.sqrt(np.sum(Br[3:50]**2)):.6}T")
+
+##################################################################################
+
+# Performing FFT of Bz
+o = len(Bz)                                                       # Length of Bz samples
+Bz_FFT = np.fft.fft(Bz)                                           # Transformed Bz
+
+Bz_FFT = np.abs(Bz_FFT)/o*2                                       # Absolute Bz
+Bz_FFT = 100*Bz_FFT/Bz_FFT[1]                   
+plt.stem(Bz_FFT)                                                  # Stem plot of FFT Bz
+plt.grid(linestyle='-', linewidth=1)
+plt.yscale('log')                                                 # Logarithmic scale for y
+plt.xlim(0,100)                                                   # Range of X axis 
+plt.ylim(1e-6,100)
+
+import pandas as pd
+dataframe3 = pd.read_excel('C:\\Users\\VASAMPAM\\Calculator_Expressions_Plot_3_for_Bz.xlsx')
+dataframe3 
+
+# Comparing the plot of Bz analytical & Bz_FEM 
+Bz_FEM = dataframe3.B_z_2
+plt.plot(np.linspace(0,360,len(Bz_FEM)),Bz_FEM,'r')
+plt.plot(np.linspace(0,360,len(Bz)),Bz,'--b')
+plt.grid(linestyle='-', linewidth=1)
+plt.title('Comparision of Analytic and FEM')
+plt.xlabel('Azimthal Angle')
+plt.ylabel('B Magnetic Field')
+plt.legend(['Bz_FEM','Bz'])
+plt.show()                                                #################################################################
+                                                          ###### Graph is reversed & FFT plot doesnt match ################ 
+print(f"Max amplitude Bz_FEM :{max(abs(Bz_FEM)):.6}T")
+print(f"Max amplitude Bz :{np.max(abs(Bz)):.6}T")
+
+# Transforming the Signal 
+Bz_FEM_FFT = np.fft.fft(Bz_FEM)
+m = len(Bz_FEM_FFT)
+Bz_FEM_FFT = np.abs(Bz_FEM_FFT)/n*2
+Bz_FEM_FFT = 100*Bz_FEM_FFT/Bz_FEM_FFT[1]
+plt.stem(Bz_FFT,'b')
+plt.stem(Bz_FEM_FFT,'r')
+
+plt.grid(linestyle = '-', linewidth=1)
+plt.yscale('log')
+plt.xlim(0,100)
+plt.ylim(1e-6,100)
+
+
+print(f"Max amplitude of transformed Bz_FEM :{np.sqrt(np.sum(Bz_FEM[3:50]**2)):.6}T")
+print(f"Max amplitude of transformed Bz :{np.sqrt(np.sum(Bz[3:50]**2)):.6}T")
+
+
+
+
+
