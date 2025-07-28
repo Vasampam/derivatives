@@ -1,0 +1,126 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.spatial.transform import Rotation as R
+
+# --- Transformation Utilities ---
+def rotate_B_field(B, rotation_matrix):
+    return rotation_matrix @ B
+
+def transform_observation_point(p_local, rotation_matrix, translation_vector):
+    return rotation_matrix @ p_local + translation_vector
+
+def generate_rotation_matrix(angles_deg, order='xyz'):
+    return R.from_euler(order, angles_deg, degrees=True).as_matrix()
+
+# --- Configuration ---
+mu_0 = 4 * np.pi * 1e-7
+Ms_vec = np.array([1e6, 0e6, 1e6])  # Magnetization in A/m (x, y, z)
+mu_r = 1.1
+eps = 1e-12
+
+x_half = 10e-3
+y_half = 2e-3
+z_half = 1e-3
+x_positions = np.linspace(-20e-3, 20e-3, 500)
+
+obs_points = [np.array([0.0, 2e-3, 2e-3])]
+
+# --- Transformation Setup ---
+apply_rotation = True
+apply_translation = True
+rotation_deg = (0, 60, 0)
+translation_mm = np.array([5.0, 0.0, 0.0]) * 1e-3
+rotation_matrix = generate_rotation_matrix(rotation_deg)
+
+# --- Magnetic Field Computation ---
+def F_func(x, y, z, x_m, y1, y2, z_k):
+    R1 = np.sqrt((x - x_m)**2 + (y - y1)**2 + (z - z_k)**2)
+    R2 = np.sqrt((x - x_m)**2 + (y - y2)**2 + (z - z_k)**2)
+    return ((y - y1) + R1) / ((y - y2) + R2 + eps)
+
+def H_func(x, y, z, x1, x2, y_m, z_k):
+    R1 = np.sqrt((x - x1)**2 + (y - y_m)**2 + (z - z_k)**2)
+    R2 = np.sqrt((x - x2)**2 + (y - y_m)**2 + (z - z_k)**2)
+    return ((x - x1) + R1) / ((x - x2) + R2 + eps)
+
+def G_func(x, y, z, x_n, y_m, z_k):
+    return 1.0 / (np.sqrt((x - x_n)**2 + (y - y_m)**2 + (z - z_k)**2) + eps)
+
+def compute_B_field(obs, magnet_center_x):
+    x_o, y_o, z_o = obs
+    x1, x2 = magnet_center_x - x_half, magnet_center_x + x_half
+    y1, y2 = -y_half, y_half
+    z1, z2 = -z_half, z_half
+
+    x_m_vals = [x1, x2]
+    y_m_vals = [y1, y2]
+    z_k_vals = [z1, z2]
+
+    Bx = By = Bz = 0.0
+
+    for k, z_k in enumerate(z_k_vals):
+        for m, x_m in enumerate(x_m_vals):
+            sign = (-1) ** (k + m)
+            Bx += sign * np.log(F_func(x_o, y_o, z_o, x_m, y1, y2, z_k))
+    Bx *= mu_0 * Ms_vec[0] * mu_r / (4 * np.pi)
+
+    for k, z_k in enumerate(z_k_vals):
+        for m, y_m in enumerate(y_m_vals):
+            sign = (-1) ** (k + m)
+            By += sign * np.log(H_func(x_o, y_o, z_o, x1, x2, y_m, z_k))
+    By *= mu_0 * Ms_vec[1] * mu_r / (4 * np.pi)
+
+    for k, z_k in enumerate(z_k_vals):
+        for n, x_n in enumerate(x_m_vals):
+            for m, y_m in enumerate(y_m_vals):
+                sign = (-1) ** (k + n + m)
+                g = G_func(x_o, y_o, z_o, x_n, y_m, z_k)
+                arctan_arg = ((x_o - x_n) * (y_o - y_m)) / ((z_o - z_k) + eps) * g
+                Bz += sign * np.arctan(arctan_arg)
+    Bz *= mu_0 * Ms_vec[2] * mu_r / (4 * np.pi)
+
+    return np.array([Bx, By, Bz])
+
+# --- Main Loop ---
+for idx, obs_local in enumerate(obs_points):
+    Bx_vals_local, By_vals_local, Bz_vals_local = [], [], []
+    Bx_vals_global, By_vals_global, Bz_vals_global = [], [], []
+
+    for xc in x_positions:
+        B_local = compute_B_field(obs_local, xc)
+
+        if apply_rotation or apply_translation:
+            B_global = rotate_B_field(B_local, rotation_matrix) if apply_rotation else B_local
+            obs_global = transform_observation_point(obs_local, rotation_matrix, translation_mm) if apply_translation else obs_local
+        else:
+            B_global = B_local
+            obs_global = obs_local
+
+        Bx_vals_local.append(B_local[0])
+        By_vals_local.append(B_local[1])
+        Bz_vals_local.append(B_local[2])
+
+        Bx_vals_global.append(B_global[0])
+        By_vals_global.append(B_global[1])
+        Bz_vals_global.append(B_global[2])
+
+    x_mm = x_positions * 1e3
+
+    # Plotting
+    for comp, vals_local, vals_global in zip(['Bx', 'By', 'Bz'],
+                                              [Bx_vals_local, By_vals_local, Bz_vals_local],
+                                              [Bx_vals_global, By_vals_global, Bz_vals_global]):
+        plt.figure(figsize=(10, 5))
+        plt.plot(x_mm, vals_local, label=f"{comp} Local", linestyle='--', color='gray')
+        plt.plot(x_mm, vals_global, label=f"{comp} Global", color='blue')
+        plt.title(f"{comp} Field Comparison (Local vs Global)\nObservation Point #{idx+1}")
+        plt.xlabel("Magnet X Position (mm)")
+        plt.ylabel(f"{comp} (T)")
+        plt.grid(True)
+        plt.legend()
+        plt.tight_layout()
+        plt.show()
+
+    print(f"\nObservation Point #{idx+1}: {obs_local*1e3} mm (local frame)")
+    if apply_rotation or apply_translation:
+        print(f"Transformed to global frame: {obs_global*1e3} mm")
