@@ -1,0 +1,140 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.spatial.transform import Rotation as R
+
+# Constants
+mu_0 = 4 * np.pi * 1e-7
+Ms = 1e6  # A/m
+R_disc = 5e-3  # Radius (5 mm)
+H_disc = 2e-3  # Height (2 mm)
+
+# Observation configuration
+r_obs = 3e-3  # 3 mm radial observation
+z_obs_list = [0.0]  # Z = 0 mm under disc
+phi_vals = np.linspace(0, 2*np.pi*5, 1000)  # 5 rotations
+
+# Noise
+noise_level = 1e-3  # 1000 uT
+
+# Rotation for transformation (Euler angles)
+rotation_deg = (0, 0, 10)  # x, y, z degrees
+rotation_matrix = R.from_euler('xyz', rotation_deg, degrees=True).as_matrix()
+
+def compute_B_disc(r, phi, z):
+    # Placeholder analytical approximation (simplified, symmetric distribution)
+    Br = (mu_0 * Ms * R_disc**2) / (2 * (R_disc**2 + z**2)**(1.5)) * np.cos(phi)
+    Bphi = (mu_0 * Ms * R_disc**2) / (2 * (R_disc**2 + z**2)**(1.5)) * np.sin(phi)
+    Bz = (mu_0 * Ms * H_disc) / (2 * (R_disc**2 + z**2)**(1.5))
+    return Br, Bphi, Bz
+
+def cylindrical_to_cartesian(Br, Bphi, Bz, phi):
+    Bx = Br * np.cos(phi) - Bphi * np.sin(phi)
+    By = Br * np.sin(phi) + Bphi * np.cos(phi)
+    return Bx, By, Bz
+
+for z_obs in z_obs_list:
+    Br_vals, Bphi_vals, Bz_vals = [], [], []
+    Bx_vals, By_vals, Bz_cart = [], [], []
+    Bx_global, By_global, Bz_global = [], [], []
+
+    for phi in phi_vals:
+        Br, Bphi, Bz = compute_B_disc(r_obs, phi, z_obs)
+        Br_vals.append(Br)
+        Bphi_vals.append(Bphi)
+        Bz_vals.append(Bz)
+
+        Bx, By, Bz_c = cylindrical_to_cartesian(Br, Bphi, Bz, phi)
+        Bx_vals.append(Bx)
+        By_vals.append(By)
+        Bz_cart.append(Bz_c)
+
+        B_local = np.array([Bx, By, Bz_c])
+        B_global = rotation_matrix @ B_local
+        
+        if np.isclose(np.degrees(phi), 0.0, atol=0.5) or np.isclose(np.degrees(phi), 90.0, atol=0.5):
+            print(f"φ = {np.degrees(phi):.2f}°")
+            print(f"  Local B-field:    Bx = {Bx:.5f} T, By = {By:.5f} T, Bz = {Bz_c:.5f} T")
+            print(f"  Global B-field:   Bx = {B_global[0]:.5f} T, By = {B_global[1]:.5f} T, Bz = {B_global[2]:.5f} T\n")
+
+        
+        Bx_global.append(B_global[0])
+        By_global.append(B_global[1])
+        Bz_global.append(B_global[2])
+
+    Bx_vals = np.array(Bx_vals)
+    By_vals = np.array(By_vals)
+    Bz_cart = np.array(Bz_cart)
+    Bx_global = np.array(Bx_global)
+    By_global = np.array(By_global)
+    Bz_global = np.array(Bz_global)
+
+    # --- Add noise for signal analysis ---
+    Br_noisy = np.array(Br_vals) + np.random.normal(0, noise_level, len(phi_vals))
+    Bphi_noisy = np.array(Bphi_vals) + np.random.normal(0, noise_level, len(phi_vals))
+
+    # --- Plot results ---
+    fig, axs = plt.subplots(4, 1, figsize=(12, 10), sharex=True)
+    axs[0].plot(np.degrees(phi_vals), Bphi_vals, label='Bphi', color='r')
+    axs[0].plot(np.degrees(phi_vals), Br_vals, label='Br', color='g')
+    axs[0].plot(np.degrees(phi_vals), Bz_vals, label='Bz', color='b')
+    axs[0].set_ylabel("B (T)")
+    axs[0].legend()
+    axs[0].set_title("Cylindrical B-Field Components")
+
+    axs[1].plot(np.degrees(phi_vals), Bx_vals, label='Bx (local)', color='r')
+    axs[1].plot(np.degrees(phi_vals), By_vals, label='By (local)', color='g')
+    axs[1].plot(np.degrees(phi_vals), Bz_cart, label='Bz (local)', color='b')
+    axs[1].legend()
+    axs[1].set_ylabel("B (T)")
+    axs[1].set_title("Cartesian B-Field (Local)")
+
+    axs[2].plot(np.degrees(phi_vals), Bx_global, label='Bx (global)', color='r')
+    axs[2].plot(np.degrees(phi_vals), By_global, label='By (global)', color='g')
+    axs[2].plot(np.degrees(phi_vals), Bz_global, label='Bz (global)', color='b')
+    axs[2].legend()
+    axs[2].set_ylabel("B (T)")
+    axs[2].set_title("Cartesian B-Field (Global Transformed)")
+
+    axs[3].plot(np.degrees(phi_vals), Br_noisy, label='Br noisy', linestyle='--', color='orange')
+    axs[3].plot(np.degrees(phi_vals), Bphi_noisy, label='Bphi noisy', linestyle='--', color='purple')
+    axs[3].legend()
+    axs[3].set_xlabel("Azimuthal Angle φ (degrees)")
+    axs[3].set_ylabel("B (T)")
+    axs[3].set_title("Noisy Br and Bphi")
+
+    plt.tight_layout()
+    plt.show()
+#######################################################################################################
+##For Disc####
+# --- Coordinate Transformation with Denavit-Hartenberg ---
+def transform_B_field_DH(B_cyl, phi_obs, x_t):
+    Br, Bphi, Bz = B_cyl
+    # Convert to Cartesian coordinates
+    Bx = Br * np.cos(phi_obs) - Bphi * np.sin(phi_obs)
+    By = Br * np.sin(phi_obs) + Bphi * np.cos(phi_obs)
+    Bz_cart = Bz
+    B_cart = np.array([Bx, By, Bz_cart, 0])  # Homogeneous coordinates
+    
+    # DH Parameters
+    theta = 5 * 2 * np.pi * (x_t / 0.1)  # 5 rotations over x_t range [-0.05, 0.05]
+    d = x_t  # Translation along z-axis
+    a = 3    # No x-axis translation
+    alpha = 0  # No twist (adjust if needed)
+    
+    # DH Transformation Matrix
+    T = np.array([
+        [np.cos(theta), -np.sin(theta) * np.cos(alpha), np.sin(theta) * np.sin(alpha), a * np.cos(theta)],
+        [np.sin(theta), np.cos(theta) * np.cos(alpha), -np.cos(theta) * np.sin(alpha), a * np.sin(theta)],
+        [0, np.sin(alpha), np.cos(alpha), d],
+        [0, 0, 0, 1]
+    ])
+    
+    # Apply transformation
+    B_cart_transformed = T @ B_cart
+    # Normalize to 3D vector (ignore homogeneous component)
+    B_cart_rot = B_cart_transformed[:3] / B_cart_transformed[3] if B_cart_transformed[3] != 0 else B_cart_transformed[:3]
+    
+    # Compute global |B|
+    global_B = np.sqrt(B_cart_rot[0]**2 + B_cart_rot[1]**2 + B_cart_rot[2]**2)
+    
+    return B_cart_rot[0], B_cart_rot[1], B_cart_rot[2], global_B  
