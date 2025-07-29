@@ -1,0 +1,50 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.interpolate import interp1d
+
+# --- Step 1: Load CSV Data from Maxwell ---
+# Update the filename if needed
+csv_file = 'New_Microsoft_Excel_Worksheet_Bar - Tabelle1.csv'
+df_maxwell = pd.read_csv(csv_file)
+
+# Assuming the CSV has headers like "x_mm" and "Bx_T"
+# Replace these with actual column names if different
+x_sim = df_maxwell.iloc[:, 0].values  # X in mm
+Bx_sim = df_maxwell.iloc[:, 1].values  # Bx in Tesla
+
+# --- Step 2: Interpolate analytical data to match simulation x points ---
+# Ensure your x_mm and Bx_vals are already defined above
+interp_analytical = interp1d(x_mm, Bx_vals, kind='linear', bounds_error=False, fill_value="extrapolate")
+Bx_analytical_interp = interp_analytical(x_sim)
+
+# --- Step 3: Compute percentage error ---
+percent_error = 100 * np.abs((Bx_sim - Bx_analytical_interp) / (np.abs(Bx_sim) + 1e-12))  # Avoid division by zero
+
+# --- Step 4: Plot Comparison ---
+plt.figure(figsize=(12, 6))
+plt.plot(x_sim, Bx_sim, label='Bx (Maxwell)', color='blue')
+plt.plot(x_sim, Bx_analytical_interp, label='Bx (Analytical)', color='red', linestyle='--')
+plt.xlabel('X Position (mm)')
+plt.ylabel('Bx (Tesla)')
+plt.title('Validation of Bx: Analytical vs Maxwell')
+plt.grid(True, linestyle='--')
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+# --- Step 5: Plot Percentage Error ---
+plt.figure(figsize=(10, 4))
+plt.plot(x_sim, percent_error, label='Percentage Error', color='purple')
+plt.xlabel('X Position (mm)')
+plt.ylabel('Error (%)')
+plt.title('Percentage Error between Analytical and Maxwell Bx')
+plt.grid(True, linestyle='--')
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+# --- Optional: Report maximum error ---
+max_error = np.max(percent_error)
+max_error_index = np.argmax(percent_error)
+print(f"Maximum Percentage Error: {max_error:.2f}% at x = {x_sim[max_error_index]:.2f} mm")
