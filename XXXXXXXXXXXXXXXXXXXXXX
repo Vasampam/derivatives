@@ -1,0 +1,158 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import pandas as pd
+
+# Constants
+mu_0 = 4 * np.pi * 1e-7
+mu_r = 1.0997785 # From Maxwell's material property
+Ms = 1e6 # A/m, Magnitude of Magnetization
+eps = 1e-12  # small value to avoid singularities
+
+# Magnetization vector (A/m) - X-DIRECTION
+
+Ms_vec = np.array([1, 0, 0])
+
+# Magnet dimensions (FIXED position in global coordinates, centered at origin)
+# This assumes the bar magnet in Maxwell is fixed from X=-10mm to X=10mm, Y=-2mm to Y=2mm, Z=-1mm to Z=1mm.
+x1_magnet_fixed = 10e-3                       # -10 mm
+x2_magnet_fixed = 30e-3                       # 10 mm
+y1_magnet_fixed = 0e-3                        # -2 mm
+y2_magnet_fixed = 4e-3                        # 2 mm
+z1_magnet_fixed = 0e-3                        # -1 mm
+z2_magnet_fixed = 2e-3                        # 1 mm
+
+
+# Observation points (SWEEPING along X)
+# The X-axis in your Maxwell plots goes from 0 to 40mm.
+x_obs_scan = np.linspace(0e-3, 40e-3, 500)
+# Fixed Y and Z for the observation line (from your analytical plots: [20. 2. 2.5] mm, where 20. is X_obs which is now variable)
+fixed_y_obs = 2e-3   # 2 mm
+fixed_z_obs = 3e-3 # 2.5 mm
+
+##########################################################################
+####################### Helper functions #################################
+##########################################################################
+
+def G_func(x, y, z, x_n, y_m, z_k):
+    return 1.0 / (np.sqrt((x - x_n)**2 + (y - y_m)**2 + (z - z_k)**2) + eps)
+
+def H_func(x, y, z, x1, x2, y_m, z_k):
+    R1 = np.sqrt((x - x1)**2 + (y - y_m)**2 + (z - z_k)**2)
+    R2 = np.sqrt((x - x2)**2 + (y - y_m)**2 + (z - z_k)**2)
+    num = (x - x1) + R1
+    den = (x - x2) + R2 + eps
+    return num / den
+
+def F_func(x, y, z, x_n, y1, y2, z_k):
+    R1 = np.sqrt((x - x_n)**2 + (y - y1)**2 + (z - z_k)**2)
+    R2 = np.sqrt((x - x_n)**2 + (y - y2)**2 + (z - z_k)**2)
+    num = (y - y1) + R1
+    den = (y - y2) + R2 + eps
+    return num / den
+
+def compute_B_field_at_obs(x_obs, y_obs, z_obs, x1_m, x2_m, y1_m, y2_m, z1_m, z2_m, Ms_magnitude, Ms_direction_vec, mu_r_val):
+    # Initialize B components
+    Bx_comp = 0.0                         # Bx component from analytical formula
+    By_comp = 0.0                         # By component from analytical formula
+    Bz_comp = 0.0                         # Bz component from analytical formula
+    
+    # Bx formula contribution 
+    for k, z_k in enumerate([z1_m, z2_m]):
+        for n, x_n in enumerate([x1_m, x2_m]):
+            for m, y_m in enumerate([y1_m, y2_m]):
+                sign = (-1)**(k + n + m)
+                g = G_func(x_obs, y_obs, z_obs, x_n, y_m, z_k)
+                arctan_arg = ((y_obs - y_m) * (z_obs - z_k)) / ((x_obs - x_n) + eps) * g
+                Bx_comp += sign * np.arctan(arctan_arg)
+    # Apply Ms_magnitude and the X-component of Ms_vec
+    Bx_total = Bx_comp * (mu_0 * Ms_magnitude * Ms_direction_vec[0] * mu_r_val) / (4 * np.pi)
+
+                
+    # By formula contribution (was previously linked to Ms_vec[1])
+    for k, z_k in enumerate([z1_m, z2_m]):
+        for m, y_m in enumerate([y1_m, y2_m]):
+            sign = (-1)**(k + m)
+            H = H_func(x_obs, y_obs, z_obs, x1_m, x2_m, y_m, z_k)
+            By_comp += sign * np.log(H)
+    # Apply Ms_magnitude and the Y-component of Ms_vec
+    By_total = By_comp * (mu_0 * Ms_magnitude * Ms_direction_vec[1] * mu_r_val) / (4 * np.pi)
+    
+    
+    # Bz formula contribution 
+    for k, z_k in enumerate([z1_m, z2_m]):
+        for n, x_n in enumerate([x1_m, x2_m]):
+            sign = (-1)**(k + n)
+            F = F_func(x_obs, y_obs, z_obs, x_n, y1_m, y2_m, z_k)
+            Bx_comp += sign * np.log(F)
+    # Apply Ms_magnitude and the Z-component of Ms_vec
+    Bz_total = Bz_comp * (mu_0 * Ms_magnitude * Ms_direction_vec[2] * mu_r_val) / (4 * np.pi)
+
+    return Bx_total, By_total, Bz_total
+##############################################################################################    
+################################--- Main computation ---######################################
+##############################################################################################
+Bx_vals, By_vals, Bz_vals, Bmag_vals = [], [], [], []
+
+# Loop through each x_obs_position while magnet is FIXED
+for x_obs_pt in x_obs_scan:
+    Bx, By, Bz = compute_B_field_at_obs(x_obs_pt, fixed_y_obs, fixed_z_obs,
+                                        x1_magnet_fixed, x2_magnet_fixed,
+                                        y1_magnet_fixed, y2_magnet_fixed,
+                                        z1_magnet_fixed, z2_magnet_fixed,
+                                        Ms, Ms_vec, mu_r)
+    Bmag = np.sqrt(Bx**2 + By**2 + Bz**2)
+    Bx_vals.append(Bx)
+    By_vals.append(By)
+    Bz_vals.append(Bz)
+    Bmag_vals.append(Bmag)
+
+# Convert for plotting
+x_mm = x_obs_scan * 1e3
+Bx_vals = np.array(Bx_vals)
+By_vals = np.array(By_vals)
+Bz_vals = np.array(Bz_vals)
+Bmag_vals = np.array(Bmag_vals)
+
+max_idx = np.argmax(Bmag_vals)
+print(f"\nMagnet Fixed at: X=[{x1_magnet_fixed*1e3:.1f}, {x2_magnet_fixed*1e3:.1f}] mm, Y=[{y1_magnet_fixed*1e3:.1f}, {y2_magnet_fixed*1e3:.1f}] mm, Z=[{z1_magnet_fixed*1e3:.1f}, {z2_magnet_fixed*1e3:.1f}] mm")
+print(f"Observation Line: Y={fixed_y_obs*1e3:.1f} mm, Z={fixed_z_obs*1e3:.1f} mm, X-scan from {x_mm.min():.1f} to {x_mm.max():.1f} mm")
+print(f"Max |B| = {Bmag_vals[max_idx]:.6f} T at x = {x_mm[max_idx]:.6f} mm")
+print(f"  --> Bx = {Bx_vals[max_idx]:.6f} T")
+print(f"  --> By = {By_vals[max_idx]:.6f} T")
+print(f"  --> Bz = {Bz_vals[max_idx]:.6f} T")
+
+# Plotting
+plt.figure(figsize=(12, 7))
+plt.plot(x_mm, Bx_vals, label='Bx (Analytical)', color='red')
+plt.plot(x_mm, By_vals, label='By (Analytical)', color='green')
+plt.plot(x_mm, Bz_vals, label='Bz (Analytical)', color='blue')
+plt.plot(x_mm, Bmag_vals, label='|B| (Analytical)', linestyle='--', color='purple')
+
+plt.xlabel('Observation X Position (mm)')
+plt.ylabel('Magnetic Field (T)')
+plt.title('Analytical Magnetic Field Components vs. Observation Position (X-Magnetization Only)')
+plt.grid(True, linestyle='--', alpha=0.7)
+plt.legend()
+plt.axvline(x1_magnet_fixed * 1000, color='gray', linestyle=':', label='Magnet X-start')
+plt.axvline(x2_magnet_fixed * 1000, color='gray', linestyle=':', label='Magnet X-end')
+plt.tight_layout()
+plt.show()
+
+
+
+
+alpha=np.linspace(-180,180,1000)
+x=np.cos(alpha*np.pi/180)+0.3*np.cos(3*alpha*np.pi/180);
+y=np.sin(alpha*np.pi/180)+0.5*np.sin(3*alpha*np.pi/180);
+
+alpha_cal=np.arctan2(y,x)*180/np.pi
+
+Epsilon=alpha-alpha_cal;
+plt.plot(alpha,x,alpha,y)
+
+
+plt.plot(alpha,Epsilon)
+
+plt.plot(alpha,alpha,alpha,alpha_cal)
+
+
