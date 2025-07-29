@@ -1,0 +1,124 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Constants
+mu_0 = 4 * np.pi * 1e-7
+mu_r = 1.0997785
+Ms = 1e6  # A/m
+eps = 1e-12
+
+# Magnetization in X-direction
+Ms_vec = np.array([1, 0, 0])
+
+# Fixed magnet dimensions (local coordinates)
+x1_local, x2_local = -10e-3, 10e-3
+y1_local, y2_local = -2e-3, 2e-3
+z1_local, z2_local = -1e-3, 1e-3
+
+# Set translation vector (e.g., move magnet center to x=20mm, y=2mm, z=1mm)
+translation_vector = np.array([20e-3, 2e-3, 1e-3])
+dx, dy, dz = translation_vector
+
+# Apply translation to get global magnet bounds
+x1_magnet = x1_local + dx
+x2_magnet = x2_local + dx
+y1_magnet = y1_local + dy
+y2_magnet = y2_local + dy
+z1_magnet = z1_local + dz
+z2_magnet = z2_local + dz
+
+# Observation setup (defined in local frame)
+x_obs_local = np.linspace(-20e-3, 20e-3, 500)
+y_obs_local = 2e-3
+z_obs_local = 2.5e-3
+
+# Transform observation points to global frame
+x_obs_scan = x_obs_local + dx
+fixed_y_obs = y_obs_local + dy
+fixed_z_obs = z_obs_local + dz
+
+# Example transformation output
+obs_local = np.array([0.0, y_obs_local, z_obs_local])
+obs_global = obs_local + translation_vector
+print(f"Observation Point #1: {obs_local * 1e3} mm (local frame)")
+print(f"Transformed Observation Point: {obs_global * 1e3} mm (global frame)")
+
+def G_func(x, y, z, x_n, y_m, z_k):
+    return 1.0 / (np.sqrt((x - x_n)**2 + (y - y_m)**2 + (z - z_k)**2) + eps)
+
+def H_func(x, y, z, x1, x2, y_m, z_k):
+    R1 = np.sqrt((x - x1)**2 + (y - y_m)**2 + (z - z_k)**2)
+    R2 = np.sqrt((x - x2)**2 + (y - y_m)**2 + (z - z_k)**2)
+    num = (x - x1) + R1
+    den = (x - x2) + R2 + eps
+    return num / den
+
+def F_func(x, y, z, x_n, y1, y2, z_k):
+    R1 = np.sqrt((x - x_n)**2 + (y - y1)**2 + (z - z_k)**2)
+    R2 = np.sqrt((x - x_n)**2 + (y - y2)**2 + (z - z_k)**2)
+    num = (y - y1) + R1
+    den = (y - y2) + R2 + eps
+    return num / den
+
+def compute_B_field_at_obs(x_obs, y_obs, z_obs):
+    Bx_comp, By_comp, Bz_comp = 0.0, 0.0, 0.0
+
+    for k, z_k in enumerate([z1_magnet, z2_magnet]):
+        for n, x_n in enumerate([x1_magnet, x2_magnet]):
+            for m, y_m in enumerate([y1_magnet, y2_magnet]):
+                sign = (-1)**(k + n + m)
+                g = G_func(x_obs, y_obs, z_obs, x_n, y_m, z_k)
+                arctan_arg = ((y_obs - y_m) * (z_obs - z_k)) / ((x_obs - x_n) + eps) * g
+                Bx_comp += sign * np.arctan(arctan_arg)
+
+    Bx_total = Bx_comp * (mu_0 * Ms * Ms_vec[0] * mu_r) / (4 * np.pi)
+
+    for k, z_k in enumerate([z1_magnet, z2_magnet]):
+        for m, y_m in enumerate([y1_magnet, y2_magnet]):
+            sign = (-1)**(k + m)
+            H = H_func(x_obs, y_obs, z_obs, x1_magnet, x2_magnet, y_m, z_k)
+            By_comp += sign * np.log(H)
+
+    By_total = By_comp * (mu_0 * Ms * Ms_vec[1] * mu_r) / (4 * np.pi)
+
+    for k, z_k in enumerate([z1_magnet, z2_magnet]):
+        for n, x_n in enumerate([x1_magnet, x2_magnet]):
+            sign = (-1)**(k + n)
+            F = F_func(x_obs, y_obs, z_obs, x_n, y1_magnet, y2_magnet, z_k)
+            Bz_comp += sign * np.log(F)
+
+    Bz_total = Bz_comp * (mu_0 * Ms * Ms_vec[2] * mu_r) / (4 * np.pi)
+
+    return Bx_total, By_total, Bz_total
+
+# Compute B field across observation points
+Bx_vals, By_vals, Bz_vals, Bmag_vals = [], [], [], []
+
+for x_obs in x_obs_scan:
+    Bx, By, Bz = compute_B_field_at_obs(x_obs, fixed_y_obs, fixed_z_obs)
+    Bmag = np.sqrt(Bx**2 + By**2 + Bz**2)
+    Bx_vals.append(Bx)
+    By_vals.append(By)
+    Bz_vals.append(Bz)
+    Bmag_vals.append(Bmag)
+
+# Find max Bmag value and its corresponding x
+idx_max = np.argmax(Bmag_vals)
+print(f"Max |B| = {Bmag_vals[idx_max]:.6f} T at x = {x_mm[idx_max]:.2f} mm")
+print(f"  --> Local B-field:  Bx = {Bx_vals[idx_max]:.6f} T, By = {By_vals[idx_max]:.6f} T, Bz = {Bz_vals[idx_max]:.6f} T")
+print(f"  --> Global B-field: Bx = {Bx_vals[idx_max]:.6f} T, By = {By_vals[idx_max]:.6f} T, Bz = {Bz_vals[idx_max]:.6f} T")
+
+# Plot
+x_mm = x_obs_scan * 1e3
+plt.figure(figsize=(12, 7))
+plt.plot(x_mm, Bx_vals, label='Bx', color='r')
+plt.plot(x_mm, Bmag_vals, label='|B|', linestyle='--', color='purple')
+plt.axvline(x1_magnet * 1e3, linestyle=':', color='gray', label='Magnet Start')
+plt.axvline(x2_magnet * 1e3, linestyle=':', color='gray', label='Magnet End')
+plt.xlabel("X Observation (mm)")
+plt.ylabel("Magnetic Field (T)")
+plt.title("Translated Bar Magnet – X-Magnetization Only")
+plt.grid(True)
+plt.legend()
+plt.tight_layout()
+plt.show()
