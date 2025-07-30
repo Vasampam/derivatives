@@ -1,0 +1,22 @@
+# Load data
+
+dataframe = pd.read_excel(r'C:\Users\VASAMPAM\OneDrive - Schaeffler\Desktop\Bar_Bx_one.xlsx')
+
+dataframe
+
+
+
+# Comparing the plot of Bx analytical & Bx FEM 
+Bx_FEM = dataframe.Bx
+plt.plot(np.linspace(0,360,len(Bx_FEM)),Bx_FEM,'r')
+plt.plot(np.linspace(0,360,len(Bx_vals)),Bx_vals,'--b')
+
+plt.grid(linestyle='-', linewidth=1)
+plt.title('Comparision of Analytic and FEM')
+plt.xlabel('Azimuthal Angle')
+plt.ylabel('B Magnetic Field')
+plt.legend(['Bx_FEM','Bx'])
+plt.show()
+
+print(f"Max amplitude Bx_FEM :{max(abs(Bx_FEM)):.6}T")
+print(f"Max amplitude Bx :{np.max(abs(Bx_vals)):.6}T")
