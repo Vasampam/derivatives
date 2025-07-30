@@ -1,0 +1,224 @@
+import numpy as np
+from scipy.integrate import dblquad
+from scipy.fft import fft
+import matplotlib.pyplot as plt
+import time
+
+# --- 1. Physical Constants and Magnet Parameters ---
+mu_o = 4 * np.pi * 1e-7   # Permeability of free space (H/m)
+M_s = 1 * 10 **6          # Magnetization (A/m)
+mu_r = 1.1
+
+R_magnet_outer = 4e-3                   # Outer radius of the solid disc magnet (meters)
+z_magnet_start = 0                      # Start z-coordinate of the magnet (meters)
+z_magnet_end = 2e-3                     # End z-coordinate of the magnet (meters)
+disk_thickness = z_magnet_end - z_magnet_start # Calculate magnet thickness
+
+common_prefactor = (mu_o * M_s * mu_r) / (4 * np.pi)
+
+# --- Define Varying Parameters for Z-axis Plot ---
+fixed_r_obs = 3e-3 # Fixed radial distance for observation (e.g., 3 mm from center)
+z_observation_points = np.linspace(-2e-3, -4e-3, 3) # From 0 to -2 mm (below magnet), 3 points
+phi_observation_points = np.linspace(0, 10 * np.pi, 50) # 50 points for 5 revolutions
+
+# --- Rotational Transformation Parameter ---
+phi_rotation_points = np.linspace(0, 10 * np.pi, 5) # 5 points for 5 revolutions
+
+# ====================================================================
+# Core Helper Function: g(r,phi,z,r',phi',z') - Pure NumPy (CPU)
+# ====================================================================
+def g_func(r_obs, phi_obs, z_obs, r_prime, phi_prime, z_prime):
+    """
+    Calculates g = 1 / distance, where distance is between observation (r,phi,z)
+    and source (r_prime, phi_prime, z_prime). Pure NumPy for CPU.
+    """
+    d_squared = r_obs**2 + r_prime**2 - 2 * r_obs * r_prime * np.cos(phi_obs - phi_prime) + (z_obs - z_prime)**2
+    if d_squared < 1e-10:  # Threshold to avoid division by zero
+        return 0.0
+    return 1.0 / np.sqrt(d_squared)
+
+# ====================================================================
+# Integrand Functions for SciPy's dblquad (CPU-based) with Rotation
+# ====================================================================
+def integrand_Br_dblquad(phi_prime, z_prime, r_obs, phi_obs, z_obs, r_prime, phi_rot):
+    phi_prime_rot = phi_prime + phi_rot
+    g_val = g_func(r_obs, phi_obs, z_obs, r_prime, phi_prime_rot, z_prime)
+    return np.cos(phi_prime_rot) * (r_obs - r_prime * np.cos(phi_obs - phi_prime_rot)) * g_val**3
+
+def integrand_Bphi_dblquad(phi_prime, z_prime, r_obs, phi_obs, z_obs, r_prime, phi_rot):
+    phi_prime_rot = phi_prime + phi_rot
+    g_val = g_func(r_obs, phi_obs, z_obs, r_prime, phi_prime_rot, z_prime)
+    return np.cos(phi_prime_rot) * np.sin(phi_obs - phi_prime_rot) * g_val**3
+
+def integrand_Bz_dblquad(phi_prime, z_prime, r_obs, phi_obs, z_obs, r_prime, phi_rot):
+    phi_prime_rot = phi_prime + phi_rot
+    g_val = g_func(r_obs, phi_obs, z_obs, r_prime, phi_prime_rot, z_prime)
+    return np.cos(phi_prime_rot) * (z_obs - z_prime) * g_val**3
+
+# --- Function to Calculate ALL B Components at a Single Observation Point ---
+def calculate_B_field_scipy_solid(r_obs, phi_obs, z_obs, phi_rot):
+    print(f"Starting integration for phi_rot={phi_rot:.2f}, phi_obs={phi_obs:.2f}")
+    phi_prime_lower = 0.0
+    phi_prime_upper = 2 * np.pi
+    z_prime_lower = z_magnet_start
+    z_prime_upper = z_magnet_end
+    args_tuple = (r_obs, phi_obs, z_obs, phi_rot)
+    integral_kwargs = {'epsabs': 1e-3, 'epsrel': 1e-3}  # Looser tolerances
+
+    integral_Br, _ = dblquad(
+        integrand_Br_dblquad, z_prime_lower, z_prime_upper,
+        lambda z_prime: phi_prime_lower, lambda z_prime: phi_prime_upper,
+        args=args_tuple + (R_magnet_outer,),
+        **integral_kwargs
+    )
+    integral_Bphi, _ = dblquad(
+        integrand_Bphi_dblquad, z_prime_lower, z_prime_upper,
+        lambda z_prime: phi_prime_lower, lambda z_prime: phi_prime_upper,
+        args=args_tuple + (R_magnet_outer,),
+        **integral_kwargs
+    )
+    integral_Bz, _ = dblquad(
+        integrand_Bz_dblquad, z_prime_lower, z_prime_upper,
+        lambda z_prime: phi_prime_lower, lambda z_prime: phi_prime_upper,
+        args=args_tuple + (R_magnet_outer,),
+        **integral_kwargs
+    )
+
+    Br = common_prefactor * R_magnet_outer * integral_Br
+    Bphi = common_prefactor * R_magnet_outer ** 2 * integral_Bphi
+    Bz = common_prefactor * R_magnet_outer * integral_Bz
+    return Br, Bphi, Bz
+
+def cylindrical_to_cartesian_B(Br, Bphi, Bz, phi_obs):
+    """Convert cylindrical magnetic field components to Cartesian components."""
+    Bx = Br * np.cos(phi_obs) - Bphi * np.sin(phi_obs)
+    By = Br * np.sin(phi_obs) + Bphi * np.cos(phi_obs)
+    Bz_cartesian = Bz
+    return Bx, By, Bz_cartesian
+
+# ====================================================================
+# Functions for Signal Analysis
+# ====================================================================
+def calculate_amplitude(signal):
+    return np.max(signal) - np.min(signal)
+
+def calculate_thd(signal):
+    N = len(signal)
+    if N < 2: return np.nan
+    yf = fft(signal)
+    magnitudes = 2.0 / N * np.abs(yf[1:N//2])
+    if len(magnitudes) == 0: return np.nan
+    fundamental_idx = np.argmax(magnitudes)
+    fundamental_power = magnitudes[fundamental_idx]**2
+    harmonic_power_sum = np.sum(magnitudes**2) - fundamental_power
+    if fundamental_power == 0: return np.nan
+    thd = np.sqrt(harmonic_power_sum / fundamental_power)
+    return thd
+
+def calculate_snr(signal, noise_level_tesla=0.0):
+    if noise_level_tesla > 0:
+        noise = np.random.normal(0, noise_level_tesla, len(signal))
+        noisy_signal = signal + noise
+        true_signal_power = np.mean(signal**2)
+        added_noise_power = np.mean(noise**2)
+        if added_noise_power == 0:
+            return np.nan, noisy_signal
+        snr_linear = true_signal_power / added_noise_power
+        snr_db = 10 * np.log10(snr_linear)
+        return snr_db, noisy_signal
+    else:
+        return np.nan, signal
+
+# --- Data Storage ---
+all_Br_data = {}
+all_Bphi_data = {}
+all_Bz_data = {}
+all_B_magnitudes = {}
+all_Bx_data = {}
+all_By_data = {}
+all_Bz_cartesian_data = {}
+all_Br_noisy_data = {}
+all_Bphi_noisy_data = {}
+
+print(f"\n--- Calculating B-field components for fixed radial distance r = {fixed_r_obs*1000:.1f} mm ---")
+
+total_start_time = time.time()
+noise_standard_deviation = 1e-3
+
+for z_obs_val in z_observation_points:
+    print(f"\n--- Calculating for z = {z_obs_val*1000:.1f} mm ---")
+    
+    Br_values_current_z = np.zeros((len(phi_rotation_points), len(phi_observation_points)))
+    Bphi_values_current_z = np.zeros((len(phi_rotation_points), len(phi_observation_points)))
+    Bz_values_current_z = np.zeros((len(phi_rotation_points), len(phi_observation_points)))
+    B_magnitudes_current_z = np.zeros((len(phi_rotation_points), len(phi_observation_points)))
+
+    Bx_values_current_z = np.zeros((len(phi_rotation_points), len(phi_observation_points)))
+    By_values_current_z = np.zeros((len(phi_rotation_points), len(phi_observation_points)))
+    Bz_cartesian_values_current_z = np.zeros((len(phi_rotation_points), len(phi_observation_points)))
+
+    start_time_phi_calc = time.time()
+    for i, phi_rot in enumerate(phi_rotation_points):
+        for j, phi_val in enumerate(phi_observation_points):
+            br, bphi, bz = calculate_B_field_scipy_solid(fixed_r_obs, phi_val, z_obs_val, phi_rot)
+            Br_values_current_z[i, j] = br
+            Bphi_values_current_z[i, j] = bphi
+            Bz_values_current_z[i, j] = bz
+            B_magnitude = np.sqrt(br**2 + bphi**2 + bz**2)
+            B_magnitudes_current_z[i, j] = B_magnitude
+            bx, by, bz_cartesian = cylindrical_to_cartesian_B(br, bphi, bz, phi_val)
+            Bx_values_current_z[i, j] = bx
+            By_values_current_z[i, j] = by
+            Bz_cartesian_values_current_z[i, j] = bz_cartesian
+    
+    end_time_phi_calc = time.time()
+    print(f"--- Calculation for z = {z_obs_val*1000:.1f} mm complete in {end_time_phi_calc - start_time_phi_calc:.2f} seconds.")
+    
+    all_Br_data[z_obs_val] = Br_values_current_z
+    all_Bphi_data[z_obs_val] = Bphi_values_current_z
+    all_Bz_data[z_obs_val] = Bz_values_current_z
+    all_B_magnitudes[z_obs_val] = B_magnitudes_current_z
+    all_Bx_data[z_obs_val] = Bx_values_current_z
+    all_By_data[z_obs_val] = By_values_current_z
+    all_Bz_cartesian_data[z_obs_val] = Bz_cartesian_values_current_z
+
+    print(f"Maximum |B| at z = {z_obs_val*1000:.1f} mm: {np.max(B_magnitudes_current_z):.6f} T")
+
+    _, noisy_bphi = calculate_snr(Bphi_values_current_z[0, :], noise_standard_deviation)
+    _, noisy_br = calculate_snr(Br_values_current_z[0, :], noise_standard_deviation)
+    all_Bphi_noisy_data[z_obs_val] = noisy_bphi
+    all_Br_noisy_data[z_obs_val] = noisy_br
+
+total_end_time = time.time()
+print(f"\nAll volume calculations complete in {total_end_time - total_start_time:.2f} seconds.")
+
+# --- Plotting ---
+plt.figure(figsize=(14, 15))
+for i, z_obs_val in enumerate(z_observation_points):
+    plt.subplot(3, 1, i+1)
+    for j, phi_rot in enumerate(phi_rotation_points):
+        plt.plot(np.degrees(phi_observation_points), all_Bx_data[z_obs_val][j, :], label=f'phi_rot={np.degrees(phi_rot):.0f}°')
+    plt.title(f'B_x vs. phi_obs at z={z_obs_val*1000:.1f} mm (r={fixed_r_obs*1000:.1f} mm)')
+    plt.xlabel('Observation Angle, phi_obs (degrees)')
+    plt.ylabel('B_x (T)')
+    plt.grid(True, linestyle='--', alpha=0.6)
+    plt.legend(title='Rotation Angle')
+
+plt.tight_layout()
+plt.show()
+
+# --- Signal Analysis ---
+print("\n--- Signal Analysis for selected z_obs ---")
+selected_z_obs_for_analysis = z_observation_points[0]
+print(f"Analyzing signal at r = {fixed_r_obs*1000:.1f} mm, z = {selected_z_obs_for_analysis*1000:.1f} mm:")
+bx_selected = all_Bx_data[selected_z_obs_for_analysis][0, :]  # First rotation
+print("\n  B_x (Cartesian):")
+amplitude_bx_selected = calculate_amplitude(bx_selected)
+print(f"    Max Amplitude: {(amplitude_bx_selected)/2:.6f} T")
+thd_bx_selected = calculate_thd(bx_selected)
+print(f"    THD: {thd_bx_selected:.4f}")
+snr_bx_selected, _ = calculate_snr(bx_selected, noise_standard_deviation)
+print(f"    SNR (with {noise_standard_deviation*1e6:.1f} uT noise): {snr_bx_selected:.2f} dB")
+
+
+
