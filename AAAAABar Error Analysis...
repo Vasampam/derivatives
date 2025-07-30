@@ -1,0 +1,281 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from scipy.interpolate import interp1d
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+
+# Constants
+mu_0 = 4 * np.pi * 1e-7
+mu_r = 1.0997785                                         # From Maxwell's material property
+Ms = 1e6                                                 # A/m, Magnitude of Magnetization
+eps = 1e-12                                              # small value to avoid singularities
+
+# Magnetization vector (A/m) - X-DIRECTION
+
+Ms_vec = np.array([1, 0, 0])
+
+# Magnet dimensions (FIXED position in global coordinates, centered at origin)
+# This assumes the bar magnet in Maxwell is fixed from X=-10mm to X=10mm, Y=-2mm to Y=2mm, Z=-1mm to Z=1mm.
+x1_magnet_fixed = 10e-3                                  # -10 mm 
+x2_magnet_fixed = 30e-3                                  # 10 mm
+y1_magnet_fixed = 0e-3                                   # -2 mm
+y2_magnet_fixed = 4e-3                                   # 2 mm
+z1_magnet_fixed = 0e-3                                   # -1 mm
+z2_magnet_fixed = 2e-3                                   # 1 mm
+
+
+# Observation points (SWEEPING along X)
+# The X-axis in your Maxwell plots goes from 0 to 40mm.
+x_obs_scan = np.linspace(0e-3, 40e-3, 1000)              # Varying X since line can also be -20 to 20 
+# Fixed Y and Z for the observation line 
+fixed_y_obs = 2e-3                                       # Middle of Width i.e Y 
+fixed_z_obs = 3e-3                                       # 1mm above the surface i.e Z 
+
+##########################################################################
+####################### Helper functions #################################
+##########################################################################
+
+def G_func(x, y, z, x_n, y_m, z_k):
+    return 1.0 / (np.sqrt((x - x_n)**2 + (y - y_m)**2 + (z - z_k)**2) + eps)
+
+def H_func(x, y, z, x1, x2, y_m, z_k):
+    R1 = np.sqrt((x - x1)**2 + (y - y_m)**2 + (z - z_k)**2)
+    R2 = np.sqrt((x - x2)**2 + (y - y_m)**2 + (z - z_k)**2)
+    num = (x - x1) + R1
+    den = (x - x2) + R2 + eps
+    return num / den
+
+def F_func(x, y, z, x_n, y1, y2, z_k):
+    R1 = np.sqrt((x - x_n)**2 + (y - y1)**2 + (z - z_k)**2)
+    R2 = np.sqrt((x - x_n)**2 + (y - y2)**2 + (z - z_k)**2)
+    num = (y - y1) + R1
+    den = (y - y2) + R2 + eps
+    return num / den
+
+def compute_B_field_at_obs(x_obs, y_obs, z_obs, x1_m, x2_m, y1_m, y2_m, z1_m, z2_m, Ms_magnitude, Ms_direction_vec, mu_r_val):
+    # Initialize B components
+    Bx_comp = 0.0                                        # Bx component from analytical formula
+    By_comp = 0.0                                        # By component from analytical formula
+    Bz_comp = 0.0                                        # Bz component from analytical formula
+    
+    # Bx formula contribution 
+    for k, z_k in enumerate([z1_m, z2_m]):
+        for n, x_n in enumerate([x1_m, x2_m]):
+            for m, y_m in enumerate([y1_m, y2_m]):
+                sign = (-1)**(k + n + m)
+                g = G_func(x_obs, y_obs, z_obs, x_n, y_m, z_k)
+                arctan_arg = ((y_obs - y_m) * (z_obs - z_k)) / ((x_obs - x_n) + eps) * g
+                Bx_comp += sign * np.arctan(arctan_arg)
+    # Apply Ms_magnitude and the X-component of Ms_vec
+    Bx_total = Bx_comp * (mu_0 * Ms_magnitude * Ms_direction_vec[0] * mu_r_val) / (4 * np.pi)
+
+                
+    # By formula contribution (was previously linked to Ms_vec[1])
+    for k, z_k in enumerate([z1_m, z2_m]):
+        for m, y_m in enumerate([y1_m, y2_m]):
+            sign = (-1)**(k + m)
+            H = H_func(x_obs, y_obs, z_obs, x1_m, x2_m, y_m, z_k)
+            By_comp += sign * np.log(H)
+    # Apply Ms_magnitude and the Y-component of Ms_vec
+    By_total = By_comp * (mu_0 * Ms_magnitude * Ms_direction_vec[1] * mu_r_val) / (4 * np.pi)
+    
+    
+    # Bz formula contribution 
+    for k, z_k in enumerate([z1_m, z2_m]):
+        for n, x_n in enumerate([x1_m, x2_m]):
+            sign = (-1)**(k + n)
+            F = F_func(x_obs, y_obs, z_obs, x_n, y1_m, y2_m, z_k)
+            Bx_comp += sign * np.log(F)
+    # Apply Ms_magnitude and the Z-component of Ms_vec
+    Bz_total = Bz_comp * (mu_0 * Ms_magnitude * Ms_direction_vec[2] * mu_r_val) / (4 * np.pi)
+
+    return Bx_total, By_total, Bz_total
+
+##############################################################################################    
+################################--- Main computation ---######################################
+##############################################################################################
+
+Bx_vals, By_vals, Bz_vals, Bmag_vals = [], [], [], []
+
+# Loop through each x_obs_position while magnet is FIXED
+for x_obs_pt in x_obs_scan:
+    Bx, By, Bz = compute_B_field_at_obs(x_obs_pt, fixed_y_obs, fixed_z_obs,
+                                        x1_magnet_fixed, x2_magnet_fixed,
+                                        y1_magnet_fixed, y2_magnet_fixed,
+                                        z1_magnet_fixed, z2_magnet_fixed,
+                                        Ms, Ms_vec, mu_r)
+    Bmag = np.sqrt(Bx**2 + By**2 + Bz**2)
+    Bx_vals.append(Bx)
+    By_vals.append(By)
+    Bz_vals.append(Bz)
+    Bmag_vals.append(Bmag)
+
+# Convert for plotting
+x_mm = x_obs_scan * 1e3
+Bx_vals = np.array(Bx_vals)
+By_vals = np.array(By_vals)
+Bz_vals = np.array(Bz_vals)
+Bmag_vals = np.array(Bmag_vals)
+
+max_idx = np.argmax(Bmag_vals)
+print(f"\nMagnet Fixed at: X=[{x1_magnet_fixed*1e3:.1f}, {x2_magnet_fixed*1e3:.1f}] mm, Y=[{y1_magnet_fixed*1e3:.1f}, {y2_magnet_fixed*1e3:.1f}] mm, Z=[{z1_magnet_fixed*1e3:.1f}, {z2_magnet_fixed*1e3:.1f}] mm")
+print(f"Observation Line: Y={fixed_y_obs*1e3:.1f} mm, Z={fixed_z_obs*1e3:.1f} mm, X-scan from {x_mm.min():.1f} to {x_mm.max():.1f} mm")
+print(f"Max |B| = {Bmag_vals[max_idx]:.6f} T at x = {x_mm[max_idx]:.6f} mm")
+print(f"  --> Bx = {Bx_vals[max_idx]:.6f} T")
+print(f"  --> By = {By_vals[max_idx]:.6f} T")
+print(f"  --> Bz = {Bz_vals[max_idx]:.6f} T")
+
+# Plotting
+plt.figure(figsize=(12, 7))
+plt.plot(x_mm, Bx_vals, label='Bx (Analytical)', color='red')
+#plt.plot(x_mm, By_vals, label='By (Analytical)', color='green')
+#plt.plot(x_mm, Bz_vals, label='Bz (Analytical)', color='blue')
+plt.plot(x_mm, Bmag_vals, label='|B| (Analytical)', linestyle='--', color='purple')
+
+plt.xlabel('Observation X Position (mm)')
+plt.ylabel('Magnetic Field (T)')
+plt.title('Analytical Magnetic Field Components vs. Observation Position (X-Magnetization Only)')
+plt.grid(True, linestyle='--', alpha=0.7)
+plt.legend()
+plt.axvline(x1_magnet_fixed * 1000, color='gray', linestyle=':', label='Magnet X-start')
+plt.axvline(x2_magnet_fixed * 1000, color='gray', linestyle=':', label='Magnet X-end')
+plt.tight_layout()
+plt.show()
+
+###########################
+####Plot B Maxwell###
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+
+# --- Load CSV and skip the header row ---
+df = pd.read_csv(r'C:\Users\pramo\OneDrive\Desktop\Bar_Bx_one.csv', skiprows=1, header=None, names=["raw"])
+
+# --- Split the comma-separated values into two columns ---
+split_data = df["raw"].str.split(",", expand=True)
+split_data.columns = ['Distance_mm', 'Bx_T']
+
+# --- Convert strings to floats ---
+x_maxwell_mm = split_data['Distance_mm'].astype(float).values
+Bx_maxwell = split_data['Bx_T'].astype(float).values
+
+# --- Plot to confirm ---
+plt.figure(figsize=(10, 5))
+plt.plot(x_maxwell_mm, Bx_maxwell, label='Maxwell Bx', color='orange')
+plt.xlabel("Distance (mm)")
+plt.ylabel("Bx (T)")
+plt.title("Bx Field from Maxwell CSV")
+plt.grid(True)
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+##### RMSE MAE MPE ############
+
+from scipy.interpolate import interp1d
+from sklearn.metrics import mean_squared_error, mean_absolute_error
+
+# --- Interpolate analytical Bx onto Maxwell's x points ---
+analytic_interp = interp1d(x_mm, Bx_vals, kind='cubic', fill_value="extrapolate")
+Bx_analytic_interp = analytic_interp(x_maxwell_mm)
+
+# --- Error Metrics ---
+rmse = np.sqrt(mean_squared_error(Bx_maxwell, Bx_analytic_interp))
+mae = mean_absolute_error(Bx_maxwell, Bx_analytic_interp)
+percent_error = np.mean(np.abs((Bx_maxwell - Bx_analytic_interp) / (Bx_maxwell + 1e-12))) * 100
+
+print(f"RMSE: {rmse:.6e} T")
+print(f"MAE: {mae:.6e} T")
+print(f"Mean Percent Error: {percent_error:.2f}%")
+
+# --- Plotting Comparison ---
+plt.figure(figsize=(10, 6))
+plt.plot(x_maxwell_mm, Bx_maxwell, label='Maxwell Bx (CSV)', color='orange')
+plt.plot(x_maxwell_mm, Bx_analytic_interp, label='Analytical Bx (Interpolated)', color='blue', linestyle='--')
+plt.xlabel("Distance (mm)")
+plt.ylabel("Bx (T)")
+plt.title("Comparison of Maxwell and Analytical Bx Fields")
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+
+#######Normal validation###########
+plt.figure(figsize=(10, 5))
+plt.plot(x_mm, Bx_vals, label='Analytical Bx', linewidth=2)
+plt.plot(x_maxwell_mm, Bx_maxwell, '--', label='Maxwell Bx', linewidth=2)
+plt.xlabel("Distance (mm)")
+plt.ylabel("Bx (T)")
+plt.grid(True)
+plt.legend()
+plt.title("Validation of Bx: Analytical vs Maxwell")
+plt.tight_layout()
+plt.show()
+
+xxxxxxxxxxxxxxxxxx
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.interpolate import interp1d
+
+# Interpolate analytical Bx to the same x-axis as Maxwell's data
+interp_func = interp1d(x_mm, Bx_vals, kind='cubic', bounds_error=False, fill_value="extrapolate")
+Bx_interp = interp_func(x_maxwell_mm)  # Now same size as Maxwell data
+
+# Compute error
+error_T = Bx_interp - Bx_maxwell
+percent_error = 100 * error_T / (Bx_maxwell + 1e-12)  # Avoid div by zero
+
+# Plot percent error
+plt.figure(figsize=(10, 4))
+plt.plot(x_maxwell_mm, percent_error, label='Percent Error (%)', color='orange')
+plt.axhline(0, color='gray', linestyle='--')
+plt.xlabel("Distance (mm)")
+plt.ylabel("Percent Error (%)")
+plt.title("Percent Error in Bx: Analytical vs Maxwell")
+plt.grid(True)
+plt.legend()
+plt.tight_layout()
+plt.show()
+xxxxxxxxxxxxxxxxxxxxxxxxx
+*********************Filtered****************
+threshold = 1e-3  # 1 mT
+valid = np.abs(Bx_maxwell) > threshold
+percent_error_valid = 100 * (Bx_interp[valid] - Bx_maxwell[valid]) / Bx_maxwell[valid]
+
+# Plotting only the valid points
+plt.figure(figsize=(10, 4))
+plt.plot(x_maxwell_mm[valid], percent_error_valid, label='Filtered Percent Error (%)', color='orange')
+plt.axhline(0, color='gray', linestyle='--')
+plt.xlabel("Distance (mm)")
+plt.ylabel("Percent Error (%)")
+plt.title("Filtered Percent Error in Bx (Analytical vs Maxwell)")
+plt.grid(True)
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+********Absolute and Log ***************
+
+absolute_error = np.abs(Bx_interp - Bx_maxwell)
+
+plt.figure(figsize=(10, 4))
+plt.plot(x_maxwell_mm, absolute_error * 1e3, label='|Error| (mT)', color='green')
+plt.xlabel("Distance (mm)")
+plt.ylabel("Absolute Error (mT)")
+plt.title("Absolute Error in Bx: Analytical vs Maxwell")
+plt.grid(True)
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+plt.figure(figsize=(10, 4))
+plt.semilogy(x_maxwell_mm, np.abs(percent_error), label='Percent Error (log scale)', color='darkorange')
+plt.axhline(1, color='gray', linestyle='--')
+plt.xlabel("Distance (mm)")
+plt.ylabel("Percent Error (%)")
+plt.title("Log-Scale Percent Error in Bx")
+plt.grid(True, which='both')
+plt.legend()
+plt.tight_layout()
+plt.show()
+
