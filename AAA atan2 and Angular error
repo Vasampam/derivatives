@@ -1,0 +1,82 @@
+##########-----A tan 2 ---------#############
+
+
+alpha=np.linspace(-180,180,1000)
+x=np.cos(alpha*np.pi/180)+0.3*np.cos(3*alpha*np.pi/180);
+y=np.sin(alpha*np.pi/180)+0.5*np.sin(3*alpha*np.pi/180);
+
+alpha_cal=np.arctan2(y,x)*180/np.pi
+
+Epsilon=alpha-alpha_cal;
+plt.plot(alpha,x,alpha,y)
+
+
+plt.plot(alpha,Epsilon)
+
+plt.plot(alpha,alpha,alpha,alpha_cal)
+
+
+
+########################################################
+
+# Assuming x_mm and Bx_vals are already defined (from your simulation) zzzzzzzzzzzzzzzzzzzzzzzzzzzzz
+# Convert mm to meters for angle calculation if needed (optional)
+x_m = x_mm / 1000.0
+
+# Step 1: "True" angle from simulated relationship
+alpha_deg = np.linspace(-180, 180, len(x_mm))  # or any meaningful reference angle array if available
+
+# Step 2: "Calculated" angle between x_mm (X-axis) and Bx_vals (Y-axis)
+alpha_calc_deg = np.degrees(np.arctan2(Bz_vals, Bz_maxwell))
+
+# Step 3: Compute angular error
+angular_error = alpha_deg - alpha_calc_deg
+angular_error = (angular_error + 180) % 360 - 180                # Normalize between [-180, 180]
+
+# Step 4: Plot
+plt.figure(figsize=(12, 6))
+plt.plot(x_mm, angular_error, label='Angular Error (deg)', color='darkblue')
+plt.axhline(0, linestyle='--', color='gray', linewidth=1)
+plt.xlabel('X Position (mm)')
+plt.ylabel('Angular Error (°)')
+plt.title('Angular Error Between Bz Field and X-axis')
+plt.grid(True, linestyle='--', alpha=0.7)
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+# Optional: Diagnostics
+print(f"\nMaximum angular error: {np.max(np.abs(angular_error)):.3f}°")
+
+
+# Observation vectors (assume fixed Y and Z)
+obs_vectors = np.stack([x_mm, 
+                        np.full_like(x_mm, fixed_y_obs), 
+                        np.full_like(x_mm, fixed_z_obs)], axis=1)
+
+# B-field vectors at each point
+B_vectors = np.stack([Bx_vals, By_vals, Bz_vals], axis=1)
+
+# Normalize both sets
+obs_unit = obs_vectors / np.linalg.norm(obs_vectors, axis=1, keepdims=True)
+B_unit = B_vectors / np.linalg.norm(B_vectors, axis=1, keepdims=True)
+
+# Compute angle between them using dot product
+cos_theta = np.sum(obs_unit * B_unit, axis=1)
+cos_theta = np.clip(cos_theta, -1.0, 1.0)  # for numerical safety
+angle_deg = np.degrees(np.arccos(cos_theta))
+
+# Plot
+plt.figure(figsize=(10, 5))
+plt.plot(x_mm, angle_deg, label='Angular Deviation (°)', color='darkorange')
+plt.xlabel('Observation X Position (mm)')
+plt.ylabel('Angle Between B-field and Obs Vector (°)')
+plt.grid(True)
+plt.title('Angular Deviation of Magnetic Field from Observation Vector')
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+# Report max deviation
+print(f"Maximum Angular Deviation: {np.max(angle_deg):.2f}° at x = {x_mm[np.argmax(angle_deg)]:.2f} mm")
+
