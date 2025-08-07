@@ -1,0 +1,133 @@
+####--Plot BZ Maxwell----ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ
+# --- Load CSV and skip the header row ---
+df = pd.read_csv(r'C:\Users\pramo\OneDrive\Desktop\BarBzFinal.csv', skiprows=1, header=None, names=["raw"])
+
+# --- Split the comma-separated values into two columns ---
+split_data = df["raw"].str.split(",", expand=True)
+split_data.columns = ['Distance_mm', 'Bz_T']
+
+# --- Convert strings to floats ---
+z_maxwell_mm = split_data['Distance_mm'].astype(float).values
+Bz_maxwell = split_data['Bz_T'].astype(float).values
+
+# --- Plot to confirm ---
+plt.figure(figsize=(10, 5))
+plt.plot(z_maxwell_mm, Bz_maxwell, label='Maxwell Bz', color='purple')
+plt.xlabel("Distance (mm)")
+plt.ylabel("Bz (T)")
+plt.title("Bz Field from Maxwell CSV")
+plt.grid(True)
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+from scipy.interpolate import interp1d
+from sklearn.metrics import mean_squared_error, mean_absolute_error
+
+# --- Interpolate analytical Bx onto Maxwell's x points ---
+analytic_interp = interp1d(x_mm, Bz_vals, kind='cubic', fill_value="extrapolate")
+Bz_analytic_interp = analytic_interp(z_maxwell_mm)
+
+# --- Error Metrics ---
+rmse = np.sqrt(mean_squared_error(Bz_maxwell, Bz_analytic_interp))
+mae = mean_absolute_error(Bz_maxwell, Bz_analytic_interp)
+percent_error = np.mean(np.abs((Bz_maxwell - Bz_analytic_interp) / (Bz_maxwell + 1e-12))) * 100
+
+print(f"RMSE: {rmse:.6e} T")
+print(f"MAE: {mae:.6e} T")
+print(f"Mean Percent Error: {percent_error:.6f}%")
+
+# --- Plotting Comparison ---
+plt.figure(figsize=(10, 6))
+plt.plot(z_maxwell_mm, Bz_maxwell, label='Maxwell Bz (CSV)', color='orange')
+plt.plot(z_maxwell_mm, Bz_analytic_interp, label='Analytical Bz (Interpolated)', color='blue', linestyle='--')
+plt.xlabel("Distance (mm)")
+plt.ylabel("Bz (T)")
+plt.title("Comparison of Maxwell and Analytical Bz Fields")
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+
+plt.figure(figsize=(10, 5))
+plt.plot(x_mm, Bz_vals, label='Analytical Bz', linewidth=2)
+plt.plot(z_maxwell_mm, Bz_maxwell, '--', label='Maxwell Bz', linewidth=2)
+plt.xlabel("Distance (mm)")
+plt.ylabel("Bz (T)")
+plt.grid(True)
+plt.legend()
+plt.title("Validation of Bz: Analytical vs Maxwell")
+plt.tight_layout()
+plt.show()
+
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.interpolate import interp1d
+
+# Interpolate analytical Bx to the same x-axis as Maxwell's data
+interp_func = interp1d(x_mm, Bz_vals, kind='cubic', bounds_error=False, fill_value="extrapolate")
+Bz_interp = interp_func(z_maxwell_mm)  # Now same size as Maxwell data
+
+# Compute error
+#################-------------Percent Error----------------#####################
+error_T = Bz_interp - Bz_maxwell
+percent_error = 100 * error_T / (Bz_maxwell + 1e-12)  # Avoid div by zero
+
+# Plot percent error
+plt.figure(figsize=(10, 4))
+plt.plot(z_maxwell_mm, percent_error, label='Percent Error (%)', color='orange')
+plt.axhline(0, color='gray', linestyle='--')
+plt.xlabel("Distance (mm)")
+plt.ylabel("Percent Error (%)")
+plt.title("Percent Error in Bz: Analytical vs Maxwell")
+plt.grid(True)
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+#################-------------Filtered Percent Error----------------#####################
+
+threshold = 1e-3  # 1 mT
+valid = np.abs(Bz_maxwell) > threshold
+percent_error_valid = 100 * (Bz_interp[valid] - Bz_maxwell[valid]) / Bz_maxwell[valid]
+
+# Plotting only the valid points
+plt.figure(figsize=(10, 4))
+plt.plot(z_maxwell_mm[valid], percent_error_valid, label='Filtered Percent Error (%)', color='orange')
+plt.axhline(0, color='gray', linestyle='--')
+plt.xlabel("Distance (mm)")
+plt.ylabel("Percent Error (%)")
+plt.title("Filtered Percent Error in Bz (Analytical vs Maxwell)")
+plt.grid(True)
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+
+#################-------------Absolute Error----------------#####################
+
+absolute_error = np.abs(Bz_interp - Bz_maxwell)
+
+plt.figure(figsize=(10, 4))
+plt.plot(z_maxwell_mm, absolute_error * 1e3, label='|Error| (mT)', color='green')
+plt.xlabel("Distance (mm)")
+plt.ylabel("Absolute Error (mT)")
+plt.title("Absolute Error in Bz: Analytical vs Maxwell")
+plt.grid(True)
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+
+#################--------------Log---------------#####################
+plt.figure(figsize=(10, 4))
+plt.semilogy(z_maxwell_mm, np.abs(percent_error), label='Percent Error (log scale)', color='darkorange')
+plt.axhline(1, color='gray', linestyle='--')
+plt.xlabel("Distance (mm)")
+plt.ylabel("Percent Error (%)")
+plt.title("Log-Scale Percent Error in Bz")
+plt.grid(True, which='both')
+plt.legend()
+plt.tight_layout()
+plt.show()
+
