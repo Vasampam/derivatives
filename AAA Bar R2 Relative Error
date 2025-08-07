@@ -1,0 +1,65 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.interpolate import interp1d
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+
+import pandas as pd
+
+# Load CSV and skip header row
+#df = pd.read_csv(r'C:\Users\pramo\OneDrive\Bilder\Thesis\BARFINAL.csv', header=0)
+
+# Now extract data safely
+#x_maxwell_mm = df.iloc[:, 0].astype(float).values   # First column: Distance in mm
+#Bx_maxwell = df.iloc[:, 1].astype(float).values     # Second column: Bx in Tesla
+
+
+
+# Step 2: Prepare analytical data
+# (Update these with your actual analytical Bx values!)
+# Suppose your analytical scan is also over 1000 points from 0 to 40 mm:
+z_analytical_mm = np.linspace(0, 40, 1000)  # Your scan points (update if needed)
+#Bz_analytical = np.cos(z_analytical_mm / 40 * np.pi) * 0.2  # Example, REPLACE with your real Bx values
+Bz_analytical = Bz_vals
+
+# Step 3: Interpolate analytical Bx to match Maxwell's x points
+interpolator = interp1d(z_analytical_mm, Bz_analytical, kind='cubic', fill_value="extrapolate")
+Bz_analytical_interp = interpolator(z_maxwell_mm)
+
+# Step 4: Error metrics
+rmse = np.sqrt(mean_squared_error(Bz_maxwell, Bz_analytical_interp))
+mae = mean_absolute_error(Bz_maxwell, Bz_analytical_interp)
+r2 = r2_score(Bz_maxwell, Bz_analytical_interp)
+relative_error = np.abs(Bz_maxwell - Bz_analytical_interp) / (np.abs(Bz_maxwell) + 1e-12)
+
+# Step 5: Plot
+plt.figure(figsize=(12, 6))
+plt.plot(z_maxwell_mm, Bz_maxwell, label="Maxwell Bz (CSV)", color='blue')
+plt.plot(z_maxwell_mm, Bz_analytical_interp, label="Analytical Bz (Interpolated)", linestyle='--', color='orange')
+plt.fill_between(z_maxwell_mm, Bz_maxwell, Bz_analytical_interp, color='gray', alpha=0.2, label="Error")
+plt.xlabel("Distance (mm)")
+plt.ylabel("Bz (T)")
+plt.title("Bz Comparison: Analytical vs Maxwell")
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+
+# Step 6: Residual/Error plot
+plt.figure(figsize=(10, 4))
+plt.plot(z_maxwell_mm, Bz_maxwell - Bz_analytical_interp, color='red', label="Residual (Maxwell - Analytical)")
+plt.axhline(0, color='black', linestyle='--')
+plt.xlabel("Distance (mm)")
+plt.ylabel("Residual (T)")
+plt.title("Residual Error Plot")
+plt.grid(True)
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+# Step 7: Print metrics
+print(f"RMSE: {rmse:.6f} T")
+print(f"MAE: {mae:.6f} T")
+print(f"R² Score: {r2:.4f}")
+print(f"Mean Relative Error: {np.mean(relative_error) * 100:.2f}%")
+
