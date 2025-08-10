@@ -1,0 +1,143 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import pandas as pd
+
+# Read the CSV files as single columns first
+df_bphi = pd.read_csv(r'C:\Users\pramo\OneDrive\Bilder\Thesis\DiscBphi.csv',skiprows = 1)
+df_br = pd.read_csv(r'C:\Users\pramo\OneDrive\Bilder\Thesis\DiscBr.csv',skiprows = 1)
+df_bz = pd.read_csv(r'C:\Users\pramo\OneDrive\Bilder\Thesis\DiscBz.csv',skiprows = 1)
+
+# Split the single column into multiple columns
+# For Bphi
+col_name = df_bphi.columns[0]  # Get the single column name
+df_bphi_split = df_bphi[col_name].str.split(',', expand=True)
+df_bphi_split.columns = ['Distance [mm]', 'B_phi', 'B_phi1', 'B_phi2']
+
+# For Br
+col_name = df_br.columns[0]
+df_br_split = df_br[col_name].str.split(',', expand=True)
+df_br_split.columns = ['Distance [mm]', 'Br', 'Br1', 'Br2']
+
+# For Bz
+col_name = df_bz.columns[0]
+df_bz_split = df_bz[col_name].str.split(',', expand=True)
+df_bz_split.columns = ['Distance [mm]', 'Bz', 'Bz1', 'Bz2']
+
+# Convert string columns to numeric
+for col in df_bphi_split.columns:
+    df_bphi_split[col] = pd.to_numeric(df_bphi_split[col], errors='coerce')
+
+for col in df_br_split.columns:
+    df_br_split[col] = pd.to_numeric(df_br_split[col], errors='coerce')
+
+for col in df_bz_split.columns:
+    df_bz_split[col] = pd.to_numeric(df_bz_split[col], errors='coerce')
+
+# Replace the original dataframes
+df_bphi = df_bphi_split
+df_br = df_br_split
+df_bz = df_bz_split
+
+print("Bphi columns after fix:", df_bphi.columns)
+print("Br columns after fix:", df_br.columns)
+print("Bz columns after fix:", df_bz.columns)
+
+# Check the first few rows to verify
+print("\nBphi head:")
+print(df_bphi.head())
+
+# Now your original code should work
+# Extract data
+Bphi = df_bphi['B_phi'].values
+Bphi_FEM = df_bphi['B_phi'].values
+phi_obs_deg = df_bphi['Distance [mm]'].values
+
+Br = df_br['Br'].values
+Br_FEM = df_br['Br'].values
+phi_obs_br_deg = df_br['Distance [mm]'].values
+
+Bz = df_bz['Bz'].values
+Bz_FEM = df_bz['Bz'].values
+phi_obs_bz_deg = df_bz['Distance [mm]'].values
+
+# Continue with your FFT code...
+n = len(Bphi)
+Bphi_FFT = np.abs(np.fft.fft(Bphi)) / n * 2
+Bphi_FFT = 100 * Bphi_FFT / Bphi_FFT[1]
+
+Br_FFT = np.abs(np.fft.fft(Br)) / n * 2
+Br_FFT = 100 * Br_FFT / Br_FFT[1]
+
+Bz_FFT = np.abs(np.fft.fft(Bz)) / n * 2
+Bz_FFT = 100 * Bz_FFT / Bz_FFT[1]
+
+# Rest of your plotting code...
+# FFT Plots
+plt.figure(figsize=(12, 4))
+plt.subplot(1, 3, 1)
+plt.stem(Bphi_FFT)
+plt.grid(linestyle='-', linewidth=1)
+plt.yscale('log')
+plt.xlim(0, 100)
+plt.ylim(1e-6, 100)
+plt.title('FFT of Bphi')
+
+plt.subplot(1, 3, 2)
+plt.stem(Br_FFT)
+plt.grid(linestyle='-', linewidth=1)
+plt.yscale('log')
+plt.xlim(0, 100)
+plt.ylim(1e-6, 100)
+plt.title('FFT of Br')
+
+plt.subplot(1, 3, 3)
+plt.stem(Bz_FFT)
+plt.grid(linestyle='-', linewidth=1)
+plt.yscale('log')
+plt.xlim(0, 100)
+plt.ylim(1e-6, 100)
+plt.title('FFT of Bz')
+plt.tight_layout()
+plt.show()
+
+# Comparing plots
+plt.figure(figsize=(12, 4))
+plt.subplot(1, 3, 1)
+plt.plot(phi_obs_deg, Bphi_FEM, 'r', label='Bphi_FEM')
+plt.plot(phi_obs_deg, bphi_values, '--b', label='Bphi')
+plt.grid(linestyle='-', linewidth=1)
+plt.title('Comparison of Bphi')
+plt.xlabel('Azimuthal Angle (degrees)')
+plt.ylabel('B Magnetic Field (T)')
+plt.legend()
+
+
+plt.subplot(1, 3, 2)
+plt.plot(phi_obs_br_deg, Br_FEM, 'r', label='Br_FEM')
+plt.plot(phi_obs_br_deg, br_values, '--b', label='Br')  # Test without sign flip post-update
+plt.grid(linestyle='-', linewidth=1)
+plt.title('Comparison of Br')
+plt.xlabel('Azimuthal Angle (degrees)')
+plt.ylabel('B Magnetic Field (T)')
+plt.legend()
+
+
+plt.subplot(1, 3, 3)
+plt.plot(phi_obs_bz_deg, Bz_FEM, 'r', label='Bz_FEM')
+plt.plot(phi_obs_bz_deg, bz_values, '--b', label='Bz')  # Test without sign flip post-update
+plt.grid(linestyle='-', linewidth=1)
+plt.title('Comparison of Bz')
+plt.xlabel('Azimuthal Angle (degrees)')
+plt.ylabel('B Magnetic Field (T)')
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+
+# Print max amplitudes
+print(f"Max amplitude Bphi_FEM: {max(abs(Bphi_FEM)):.6f} T")
+print(f"Max amplitude Bphi: {np.max(abs(bphi_values)):.6f} T")
+print(f"Max amplitude Br_FEM: {max(abs(Br_FEM)):.6f} T")
+print(f"Max amplitude Br: {np.max(abs(br_values)):.6f} T")
+print(f"Max amplitude Bz_FEM: {max(abs(Bz_FEM)):.6f} T")
+print(f"Max amplitude Bz: {np.max(abs(bz_values)):.6f} T")
