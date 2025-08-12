@@ -14,7 +14,7 @@ def generate_rotation_matrix(angles_deg, order='xyz'):
 
 # --- Configuration ---
 mu_0 = 4 * np.pi * 1e-7
-Ms_vec = np.array([1e6, 0e6, 1e6])  # Magnetization in A/m (x, y, z)
+Ms =1e6  # Magnetization in A/m (x, y, z)
 mu_r = 1.1
 eps = 1e-12
 
@@ -62,13 +62,13 @@ def compute_B_field(obs, magnet_center_x):
         for m, x_m in enumerate(x_m_vals):
             sign = (-1) ** (k + m)
             Bx += sign * np.log(F_func(x_o, y_o, z_o, x_m, y1, y2, z_k))
-    Bx *= mu_0 * Ms_vec[0] * mu_r / (4 * np.pi)
+    Bx *= mu_0 * Ms * mu_r / (4 * np.pi)
 
     for k, z_k in enumerate(z_k_vals):
         for m, y_m in enumerate(y_m_vals):
             sign = (-1) ** (k + m)
             By += sign * np.log(H_func(x_o, y_o, z_o, x1, x2, y_m, z_k))
-    By *= mu_0 * Ms_vec[1] * mu_r / (4 * np.pi)
+    By *= mu_0 * Ms * mu_r / (4 * np.pi)
 
     for k, z_k in enumerate(z_k_vals):
         for n, x_n in enumerate(x_m_vals):
@@ -77,7 +77,7 @@ def compute_B_field(obs, magnet_center_x):
                 g = G_func(x_o, y_o, z_o, x_n, y_m, z_k)
                 arctan_arg = ((x_o - x_n) * (y_o - y_m)) / ((z_o - z_k) + eps) * g
                 Bz += sign * np.arctan(arctan_arg)
-    Bz *= mu_0 * Ms_vec[2] * mu_r / (4 * np.pi)
+    Bz *= mu_0 * Ms * mu_r / (4 * np.pi)
 
     return np.array([Bx, By, Bz])
 
