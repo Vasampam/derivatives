@@ -1,0 +1,76 @@
+
+#######################################################################################################
+##For Disc####
+# --- Coordinate Transformation with Denavit-Hartenberg ---
+def transform_B_field_DH(B_cyl, phi_obs, x_t):
+    Br, Bphi, Bz = B_cyl
+    # Convert to Cartesian coordinates
+    Bx = Br * np.cos(phi_obs) - Bphi * np.sin(phi_obs)
+    By = Br * np.sin(phi_obs) + Bphi * np.cos(phi_obs)
+    Bz_cart = Bz
+    B_cart = np.array([Bx, By, Bz_cart, 0])  # Homogeneous coordinates
+    
+    # DH Parameters
+    theta = 5 * 2 * np.pi * (x_t / 0.1)  # 5 rotations over x_t range [-0.05, 0.05]
+    d = x_t  # Translation along z-axis
+    a = 3    # No x-axis translation
+    alpha = 0  # No twist (adjust if needed)
+    
+    # DH Transformation Matrix
+    T = np.array([
+        [np.cos(theta), -np.sin(theta) * np.cos(alpha), np.sin(theta) * np.sin(alpha), a * np.cos(theta)],
+        [np.sin(theta), np.cos(theta) * np.cos(alpha), -np.cos(theta) * np.sin(alpha), a * np.sin(theta)],
+        [0, np.sin(alpha), np.cos(alpha), d],
+        [0, 0, 0, 1]
+    ])
+    
+    # Apply transformation
+    B_cart_transformed = T @ B_cart
+    # Normalize to 3D vector (ignore homogeneous component)
+    B_cart_rot = B_cart_transformed[:3] / B_cart_transformed[3] if B_cart_transformed[3] != 0 else B_cart_transformed[:3]
+    
+    # Compute global |B|
+    global_B = np.sqrt(B_cart_rot[0]**2 + B_cart_rot[1]**2 + B_cart_rot[2]**2)
+    
+    return B_cart_rot[0], B_cart_rot[1], B_cart_rot[2], global_B  
+################################## Rotation Translation######################
+
+import numpy as np
+
+def cylindrical_to_cartesian(r, phi, z):
+    x = r * np.cos(phi)
+    y = r * np.sin(phi)
+    return np.array([x, y, z])
+
+def get_rotation_matrix_xyz(theta_x, theta_y, theta_z):
+    # Convert degrees to radians
+    tx, ty, tz = np.radians([theta_x, theta_y, theta_z])
+
+    Rx = np.array([[1, 0, 0],
+                   [0, np.cos(tx), -np.sin(tx)],
+                   [0, np.sin(tx), np.cos(tx)]])
+
+    Ry = np.array([[np.cos(ty), 0, np.sin(ty)],
+                   [0, 1, 0],
+                   [-np.sin(ty), 0, np.cos(ty)]])
+
+    Rz = np.array([[np.cos(tz), -np.sin(tz), 0],
+                   [np.sin(tz), np.cos(tz), 0],
+                   [0, 0, 1]])
+
+    return Rz @ Ry @ Rx
+
+# Example usage
+r = 0.004       # 10 mm
+phi = np.pi/4  # 45 degrees
+z = 0.002      # 5 mm
+
+local_point = cylindrical_to_cartesian(r, phi, z)
+
+# Define orientation and position
+R = get_rotation_matrix_xyz(theta_x=0, theta_y=0, theta_z=90)  # Rotated 30° about Z
+t = np.array([0.02, 0.01, 0.005])  # Translate 20 mm x, 10 mm y, 5 mm z
+
+global_point = R @ local_point + t
+print("Global coordinates:", global_point)
+
